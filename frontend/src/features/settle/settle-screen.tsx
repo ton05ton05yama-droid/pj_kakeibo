@@ -27,6 +27,7 @@ import {
   yearNumber,
 } from '@/domain'
 import { MonthPickerSheet } from '@/features/monthPicker'
+import { useOnline } from '@/lib/use-online'
 import { BreakdownSheet, S22_STATES } from './breakdown-sheet'
 import { CalcSection } from './components/calc-section'
 import { DecideBlock } from './components/decide-block'
@@ -39,7 +40,6 @@ import { ContributionSheet } from './contribution-sheet'
 import { BUTTON, LINE, NOTE, TOAST } from './labels'
 import { whoName } from './people'
 import { decidePlan } from './undecided'
-import { useOnline } from './use-online'
 import { useSettleMonth } from './use-settle-month'
 
 /** その場の1行の置き場所（§4 S-20）。押したボタンの直下に出す */
@@ -99,12 +99,17 @@ export function SettleScreen({ onFillPending }: SettleScreenProps) {
   // 精算タブをもう一度押す・ほかのタブへ移ると、［この月を精算する］のモードは消える（§4 S-20）。
   // タブを押し直したときも履歴の key が変わるので、それを合図にする
   const navigationKey = location.key
+  const navigationState: unknown = location.state
   useEffect(() => {
     if (navigationKey === undefined) return
     setSettleNow(null)
     setCalcOpen(false)
     setMessage(null)
-  }, [navigationKey])
+    // 支出タブのお知らせ行・S-14 から渡された月を開く（`navigate('/settle', { state: { month } })`）。
+    // 外から来る値なので、MonthKey の形かどうかを確かめてから使う
+    const passed = (navigationState as { month?: unknown } | null)?.month
+    if (typeof passed === 'string' && /^\d{4}-\d{2}$/.test(passed)) setMonth(passed as MonthKey)
+  }, [navigationKey, navigationState, setMonth])
 
   const decide = useDecideContributions()
   const undoDecide = useUndoDecideContributions()
@@ -140,8 +145,13 @@ export function SettleScreen({ onFillPending }: SettleScreenProps) {
     model.remaining.a === 0 &&
     model.remaining.b === 0 &&
     !model.hasTransferred
-  // 数字の無い式は、チェックの記録が無いときだけ（§6.1-5・§6.3 ケースI）
-  const showFormula = ['estimate', 'ready', 'transfer', 'settled'].includes(state) && !model.hasDone
+  // 数字の無い式は、チェックの記録が無いときだけ（§6.1-5・§6.3 ケースI）。
+  // その月に給料が共用に入る人がいるときも出さない（式に「− 共用に入った給料」が無く、
+  // カードの金額・向きと合わなく見えるため。§6.1-5・§6.3 ケースN）
+  const showFormula =
+    ['estimate', 'ready', 'transfer', 'settled'].includes(state) &&
+    !model.hasDone &&
+    model.jointSalary.a + model.jointSalary.b === 0
   const showCards = !['empty', 'undecided', 'prep'].includes(state)
 
   /** その場の1行（§1.4）。S-20 では押したボタンの直下に出す */
@@ -303,79 +313,82 @@ export function SettleScreen({ onFillPending }: SettleScreenProps) {
 
   return (
     <>
-      <MonthAppBar
-        year={yearNumber(month)}
-        month={monthNumber(month)}
-        scrolled={scrolled}
-        canGoPrev={month > data.household.createdMonth}
-        canGoNext={month < thisMonth}
-        isDefaultMonth={month === settleDefaultMonth}
-        onPrevMonth={() => changeMonth(addMonth(month, -1))}
-        onNextMonth={() => changeMonth(addMonth(month, 1))}
-        onOpenMonthPicker={() => openSheet({ id: 'month' })}
-      />
-      {online ? null : <OfflineRow />}
+      <Box data-screen='S-20' data-state={state} display='flex' flexDirection='column' flex='1'>
+        <MonthAppBar
+          year={yearNumber(month)}
+          month={monthNumber(month)}
+          scrolled={scrolled}
+          canGoPrev={month > data.household.createdMonth}
+          canGoNext={month < thisMonth}
+          isDefaultMonth={month === settleDefaultMonth}
+          onPrevMonth={() => changeMonth(addMonth(month, -1))}
+          onNextMonth={() => changeMonth(addMonth(month, 1))}
+          onOpenMonthPicker={() => openSheet({ id: 'month' })}
+        />
+        {online ? null : <OfflineRow />}
 
-      <StatusLine state={state} model={model} month={month} now={now} bothZero={bothZero} showFormula={showFormula} />
-      {line('status')}
+        <StatusLine state={state} model={model} month={month} now={now} bothZero={bothZero} showFormula={showFormula} />
+        {line('status')}
 
-      {state === 'undecided' ? (
-        <>
-          <DecideBlock data={data} month={month} viewer={viewer} now={now} />
-          <Box>
-            <TextButton onClick={openContribution}>{BUTTON.changeNet}</TextButton>
-          </Box>
-        </>
-      ) : null}
+        {state === 'undecided' ? (
+          <>
+            <DecideBlock data={data} month={month} viewer={viewer} now={now} />
+            <Box>
+              <TextButton onClick={openContribution}>{BUTTON.changeNet}</TextButton>
+            </Box>
+          </>
+        ) : null}
 
-      {state === 'prep' ? <PrepList queue={queue} /> : null}
+        {state === 'prep' ? <PrepList queue={queue} /> : null}
 
-      {showCards ? (
-        <>
-          {PERSON_KEYS.map((p) => (
-            <SettleCard
-              key={p}
-              person={p}
+        {showCards ? (
+          <>
+            {PERSON_KEYS.map((p) => (
+              <SettleCard
+                key={p}
+                person={p}
+                data={data}
+                model={model}
+                state={state}
+                viewer={viewer}
+                onOpenBreakdown={() => openSheet({ id: 'breakdown', person: p })}
+                onCheck={() => run(p, () => onCheck(p))}
+                message={line(p)}
+              />
+            ))}
+            <JointLine model={model} estimate={state === 'estimate'} />
+            {state === 'estimate' && model.pending.length > 0 ? (
+              <Box mt='2px' fontSize='sm' color='text.muted' lineHeight='ui'>
+                {NOTE.excluded(model.pending.length)}
+              </Box>
+            ) : null}
+            <CalcSection
               data={data}
               model={model}
-              state={state}
               viewer={viewer}
-              onOpenBreakdown={() => openSheet({ id: 'breakdown', person: p })}
-              onCheck={() => run(p, () => onCheck(p))}
-              message={line(p)}
+              open={calcOpen}
+              onToggle={() => setCalcOpen((v) => !v)}
+              onOpenContribution={openContribution}
             />
-          ))}
-          <JointLine model={model} estimate={state === 'estimate'} />
-          {state === 'estimate' && model.pending.length > 0 ? (
-            <Box mt='2px' fontSize='sm' color='text.muted' lineHeight='ui'>
-              {NOTE.excluded(model.pending.length)}
-            </Box>
-          ) : null}
-          <CalcSection
-            data={data}
-            model={model}
-            viewer={viewer}
-            open={calcOpen}
-            onToggle={() => setCalcOpen((v) => !v)}
-            onOpenContribution={openContribution}
-          />
-        </>
-      ) : null}
+          </>
+        ) : null}
 
+        {state === 'transfer' || state === 'settled' ? (
+          <Box my={2}>
+            <TextButton tone='sub' onClick={() => run('redo', onReopen)}>
+              {BUTTON.reopen}
+            </TextButton>
+            {line('redo')}
+          </Box>
+        ) : null}
+      </Box>
+
+      {/* 下端に固定した部分とシートは、画面の目印の箱の外に置く（§4 S-20 の9番目の要素・§4.0.3） */}
       {foot ? (
         <SettleFoot textOnly={state === 'estimate'} withMessage={message?.at === 'main'}>
           {foot}
           {line('main')}
         </SettleFoot>
-      ) : null}
-
-      {state === 'transfer' || state === 'settled' ? (
-        <Box my={2}>
-          <TextButton tone='sub' onClick={() => run('redo', onReopen)}>
-            {BUTTON.reopen}
-          </TextButton>
-          {line('redo')}
-        </Box>
       ) : null}
 
       <MonthPickerSheet

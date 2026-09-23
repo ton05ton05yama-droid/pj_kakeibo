@@ -184,6 +184,16 @@ export function useEnqueueExpense(): UseMutationResult<void, Error, NewExpenseIn
   return useWrite((r, input: NewExpenseInput) => r.enqueueExpense(input))
 }
 
+/** 端末に保留した記録を消す（S-14 `unsent` の［削除］。DB には何も送らない） */
+export function useDropPending(): UseMutationResult<void, Error, { id: string }> {
+  return useWrite((r, { id }) => r.dropPending(id))
+}
+
+/** 端末に保留した記録を直す（S-14 `unsent` の［保存］。同じ id で置き換える） */
+export function useUpdatePending(): UseMutationResult<void, Error, { id: string; input: NewExpenseInput }> {
+  return useWrite((r, { id, input }) => r.updatePending(id, input))
+}
+
 export function useUpdateExpense(): UseMutationResult<Expense, Error, { id: string; patch: ExpensePatch }> {
   return useWrite((r, { id, patch }) => r.updateExpense(id, patch))
 }
@@ -270,12 +280,28 @@ export function useUndoReopen(): UseMutationResult<
 
 /* 設定 --------------------------------------------------------------- */
 
+/**
+ * 呼び名・色（2人とも変えられる）。`ratePct` は本人の行だけに効く（§2.2）。
+ * 出す割合だけを変えるときは `useUpdateContributionRate()` を使う。
+ */
 export function useUpdatePerson(): UseMutationResult<
   void,
   Error,
-  { person: PersonKey; name: string; color: PersonKey; ratePct: number }
+  { person: PersonKey; name: string; color: PersonKey; ratePct?: number }
 > {
-  return useWrite((r, { person, name, color, ratePct }) => r.updatePerson(person, { name, color, ratePct }))
+  return useWrite((r, { person, name, color, ratePct }) =>
+    r.updatePerson(person, ratePct === undefined ? { name, color } : { name, color, ratePct })
+  )
+}
+
+/** 出す割合（本人だけ。S-33） */
+export function useUpdateContributionRate(): UseMutationResult<void, Error, number> {
+  return useWrite((r, ratePct: number) => r.updateContributionRate(ratePct))
+}
+
+/** 給料の入り先（本人だけ。S-33）。true = 共用口座、false = 自分の口座 */
+export function useUpdateSalaryToJoint(): UseMutationResult<void, Error, boolean> {
+  return useWrite((r, salaryToJoint: boolean) => r.updateSalaryToJoint(salaryToJoint))
 }
 
 export function useUpdateDefaultPayer(): UseMutationResult<void, Error, 'self' | 'joint'> {

@@ -276,7 +276,8 @@ export function ExpenseSheet(props: ExpenseSheetProps) {
         label={sheetLabel(expense)}
         onClose={close}
         footer={
-          <Flex alignItems='center' justifyContent='space-between' gap={3}>
+          /* 上の［払った人］との間を空ける（12px。§4 S-14 `fixed` の縦の寸法） */
+          <Flex alignItems='center' justifyContent='space-between' gap={3} mt={3}>
             <TextButton tone='danger' onClick={props.onSkip}>
               今月はなし
             </TextButton>
@@ -309,7 +310,8 @@ export function ExpenseSheet(props: ExpenseSheetProps) {
       label={sheetLabel(expense)}
       onClose={close}
       footer={
-        <Flex alignItems='center' justifyContent='space-between' gap={3}>
+        /* 上の［払った人］との間を空ける（4px。§4 S-14 `own` の縦の寸法 518px） */
+        <Flex alignItems='center' justifyContent='space-between' gap={3} mt={1}>
           <TextButton tone='danger' onClick={props.onDelete}>
             削除
           </TextButton>

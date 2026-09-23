@@ -172,8 +172,15 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
       const viewer = requireSignedIn()
       const e = mustFind(id)
       assertUnlocked(e.month)
-      if (e.tpl !== null) throw new RepositoryError('fixed_row_immutable', 'この行は直せません')
-      if (e.by !== viewer) throw new RepositoryError('unknown', '相手の記録は直せません')
+      if (e.tpl !== null) {
+        // 毎月の支払いの行（S-14 `fixed`）は、**2人とも**払った人と金額だけ直せる（§2.2）。
+        // 日付・カテゴリ・メモはひな形が持つので、行からは直せない
+        if (patch.date !== undefined || patch.cat !== undefined || patch.memo !== undefined) {
+          throw new RepositoryError('fixed_row_immutable', 'この行は直せません')
+        }
+      } else if (e.by !== viewer) {
+        throw new RepositoryError('not_allowed', '相手の記録は直せません')
+      }
       if (patch.date !== undefined) {
         assertUnlocked(monthOf(patch.date))
         e.date = patch.date
@@ -193,7 +200,7 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
       const e = mustFind(id)
       assertUnlocked(e.month)
       if (e.tpl !== null || e.by !== viewer) {
-        throw new RepositoryError('unknown', 'この記録は消せません')
+        throw new RepositoryError('not_allowed', 'この記録は消せません')
       }
       state.data.expenses = state.data.expenses.filter((x) => x.id !== id)
     },
@@ -378,11 +385,14 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
         contribTotal === snap.contrib.a + snap.contrib.b &&
         PERSON_KEYS.every((p) => live[p] === snap.settle[p])
       if (!same) return blocked('changed', {})
-      // 済んだ分をチェックに戻す
+      // 済んだ分をチェックに戻す。
+      // 戻すのは **このやり直しで done に移した分だけ**（＝いまの回〈rec.round〉に積んだ行）。
+      // 前の回で済んだ分まで戻すと、確定 → チェック → やり直し → 精算 → やり直し → 元に戻す で
+      // 古い「入れた／受け取った」が二重に戻ってしまう（02 §7）。
       for (const p of PERSON_KEYS) {
         const entries = rec.done[p]
         const last = entries[entries.length - 1]
-        if (!last) continue
+        if (!last || last.round !== rec.round) continue
         rec.checks[p] = { by: last.by, at: last.at, amount: last.amount }
         rec.transferred[p] -= last.amount
         entries.pop()
@@ -398,14 +408,27 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
     },
 
     async updatePerson(person, patch) {
-      requireSignedIn()
+      const viewer = requireSignedIn()
       const other: PersonKey = person === 'a' ? 'b' : 'a'
       if (state.data.people[other].color === patch.color) {
         state.data.people[other].color = patch.color === 'a' ? 'b' : 'a'
       }
       state.data.people[person].name = patch.name
       state.data.people[person].color = patch.color
-      state.data.people[person].ratePct = patch.ratePct
+      // 出す割合は本人の行だけ（相手の行に渡ってきても変えない。§2.2。DB の update_member と同じ）
+      if (patch.ratePct !== undefined && person === viewer) {
+        state.data.people[person].ratePct = patch.ratePct
+      }
+    },
+
+    async updateContributionRate(ratePct) {
+      const viewer = requireSignedIn()
+      state.data.people[viewer].ratePct = ratePct
+    },
+
+    async updateSalaryToJoint(salaryToJoint) {
+      const viewer = requireSignedIn()
+      state.data.people[viewer].salaryToJoint = salaryToJoint
     },
 
     async updateDefaultPayer(value) {

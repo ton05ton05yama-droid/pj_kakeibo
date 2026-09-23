@@ -50,6 +50,7 @@ import {
 import {
   createSupabaseClient,
   loginIdFromEmail,
+  NOT_ALLOWED,
   type SupabaseConfig,
   toAuthError,
   toPseudoEmail,
@@ -73,6 +74,23 @@ interface RpcJson {
 function fail(error: PostgrestError | null): void {
   if (error !== null) throw toRepositoryError(error)
 }
+
+/**
+ * 1行も書けなかった・読めなかったとき（RLS の 42501・0件の PGRST116）だけ、
+ * その操作の文言に差し替えて投げる（文言はローカル実装が正本）。ほかのエラーはそのまま。
+ */
+function failRow(error: PostgrestError | null, message: string): void {
+  if (error === null) return
+  const converted = toRepositoryError(error)
+  // 「ログインし直してください」など、理由が決まっている not_allowed はそのまま通す
+  if (converted.code === 'not_allowed' && converted.message === NOT_ALLOWED) {
+    throw new RepositoryError('not_allowed', message, converted.detail)
+  }
+  throw converted
+}
+
+/** 一度に読む行の上限（05 §3.5。Data API の Max rows の既定は 1000 なので、明示して超過に気づけるようにする） */
+const READ_LIMIT = 5000
 
 /**
  * RPC の `blocked` を、ローカル実装と同じ `detail` の形にそろえる（ローカルが正。repository.ts の BlockedDetails）。
@@ -194,14 +212,18 @@ export function createSupabaseRepository(
           client.from('households').select('id, name, start_month').limit(1).single(),
           client
             .from('household_members')
-            .select('household_id, user_id, position, display_name, color, contribution_rate, default_payer')
+            .select(
+              'household_id, user_id, position, display_name, color, contribution_rate, salary_to_joint, default_payer'
+            )
             .order('position'),
           client.from('profiles').select('user_id, onboarded_at, last_seen_at'),
           client.from('fixed_cost_templates').select(TEMPLATE_COLUMNS).order('created_at'),
-          client.from('expenses').select(EXPENSE_COLUMNS),
+          client.from('expenses').select(EXPENSE_COLUMNS).limit(READ_LIMIT),
           client
             .from('month_contributions')
-            .select('month, user_id, net_income, contribution_rate, contribution, decided_by, decided_at'),
+            .select(
+              'month, user_id, net_income, contribution_rate, salary_to_joint, contribution, decided_by, decided_at'
+            ),
           client
             .from('month_settlements')
             .select(
@@ -210,8 +232,12 @@ export function createSupabaseRepository(
             ),
           client
             .from('month_settlement_lines')
-            .select('month, user_id, contribution, advance, settlement, transferred, remaining'),
-          client.from('settlement_checks').select('month, round, user_id, amount, checked_by, checked_at'),
+            .select('month, user_id, contribution, advance, settlement, transferred, remaining')
+            .limit(READ_LIMIT),
+          client
+            .from('settlement_checks')
+            .select('month, round, user_id, amount, checked_by, checked_at')
+            .limit(READ_LIMIT),
         ])
       fail(households.error)
       fail(members.error)
@@ -222,6 +248,14 @@ export function createSupabaseRepository(
       fail(settlements.error)
       fail(lines.error)
       fail(checks.error)
+
+      // 上限ぴったりなら、読み切れていない見込みが高い（ページングは入れていない）。
+      // 合計がずれたまま画面に出すより、読めなかったことを伝えて止める
+      for (const result of [expenses, lines, checks]) {
+        if (Array.isArray(result.data) && result.data.length >= READ_LIMIT) {
+          throw new RepositoryError('unknown', 'データが多すぎます（読み切れませんでした）')
+        }
+      }
 
       const householdRow = households.data as unknown as HouseholdRow
       householdId = householdRow.id
@@ -304,13 +338,19 @@ export function createSupabaseRepository(
       if (patch.payer !== undefined) row.paid_by = fromPayer(patch.payer, map)
       if (patch.memo !== undefined) row.memo = patch.memo === '' ? null : patch.memo
       const { data, error } = await client.from('expenses').update(row).eq('id', id).select(EXPENSE_COLUMNS).single()
-      fail(error)
+      // 1行も返らない＝ RLS に弾かれた（相手の記録・精算中の月）。
+      // 「精算中」なのか「相手の行」なのかは、呼び出し側が手元の monthStatus で決める
+      failRow(error, '相手の記録は直せません')
+      if (!data) throw new RepositoryError('not_allowed', '相手の記録は直せません')
       return toExpense(data as unknown as ExpenseRow, map)
     },
 
     async deleteExpense(id) {
-      const { error } = await client.from('expenses').delete().eq('id', id)
-      fail(error)
+      // delete は消せなくてもエラーにならない（RLS の using に合う行が0件なだけ）ので、
+      // 消した行を返させて0件なら断る（04 §6.1。文言はローカル実装が正本）
+      const { data, error } = await client.from('expenses').delete().eq('id', id).select('id')
+      failRow(error, 'この記録は消せません')
+      if (!data || data.length === 0) throw new RepositoryError('not_allowed', 'この記録は消せません')
     },
 
     async restoreExpense(expense) {
@@ -451,8 +491,17 @@ export function createSupabaseRepository(
         p_display_name: patch.name,
         // ドメインの a / b を DB の teal / amber に戻す（§7.2）
         p_color: patch.color === 'b' ? 'amber' : 'teal',
-        p_rate: patch.ratePct,
+        // 相手の行に渡しても DB 側（update_member）が無視する（出す割合は本人だけ。§2.2）
+        p_rate: patch.ratePct ?? null,
       })
+    },
+
+    async updateContributionRate(ratePct) {
+      await rpc('update_contribution_rate', { p_rate: ratePct })
+    },
+
+    async updateSalaryToJoint(salaryToJoint) {
+      await rpc('update_salary_to_joint', { p_salary_to_joint: salaryToJoint })
     },
 
     async updateDefaultPayer(value) {

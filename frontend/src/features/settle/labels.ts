@@ -4,7 +4,7 @@
  * **ここにある文字列だけを使う**。新しい言い方は作らない（§0.6 の5）。
  */
 import type { DateTimeKey, MonthKey, MonthStatus } from '@/domain'
-import { monthDay, monthShort, yen } from './format'
+import { monthDay, monthShort, num, yen } from './format'
 
 /* ボタン（§1.3） ---------------------------------------------------- */
 
@@ -74,7 +74,22 @@ export const NOTE = {
   done: (transferred: number): string => `済み（${yen(transferred)} ${checkLabel(transferred > 0)}）`,
   /** S-22 の一覧の下 */
   jointExcluded: '共用で払ったものは入りません',
+  /**
+   * S-20 の共用の行の下（給料が共用に入る人がいる月だけ。§6.2・§6.3 ケースN）。
+   * 共用に残る額のうち、出す額に充てなかった給料の分。
+   */
+  salaryRemainder: (amount: number): string => `うち 給料の残り ${num(amount)}円`,
+  /** S-22 の「共用に入った給料」の下（出す額までしか充てないこと） */
+  salaryCap: (net: number): string => `手取り ${num(net)} のうち 出す額まで`,
 } as const
+
+/* 給料の入り先（§6.2・S-21・S-22） ---------------------------------- */
+
+/** S-22 の行のラベル（「もう払った分」の下） */
+export const JOINT_SALARY_LABEL = '共用に入った給料'
+
+/** S-21 の、給料が共用に入る人の行に添える1行 */
+export const SALARY_TO_JOINT_HINT = '給料は共用に入る'
 
 /* トースト（§1.4。すべて「元に戻す」付き） --------------------------- */
 

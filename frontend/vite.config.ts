@@ -14,5 +14,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     css: false,
+    // テストは必ずローカル実装（見本データ）で動かす。
+    // `.env.local` に本物の値が入っていても、テストからは見えないようにする（05 §2.2）。
+    env: { VITE_SUPABASE_URL: '', VITE_SUPABASE_PUBLISHABLE_KEY: '', VITE_AUTH_EMAIL_DOMAIN: '' },
   },
 })

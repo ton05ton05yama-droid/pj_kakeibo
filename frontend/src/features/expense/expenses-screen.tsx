@@ -17,12 +17,14 @@ import { ButtonBox } from '@/components/primitives'
 import {
   useDeferExpense,
   useDeleteExpense,
+  useDropPending,
   useFillAmount,
   useHousehold,
   useRestoreExpense,
   useSetSkipped,
   useUpdateExpense,
   useUpdateLastSeen,
+  useUpdatePending,
 } from '@/data'
 import {
   type Attention,
@@ -44,13 +46,13 @@ import {
 } from '@/domain'
 import { MonthPickerSheet } from '@/features/monthPicker'
 import { formatNumber, formatYen } from '@/lib/format'
+import { useOnline } from '@/lib/use-online'
 import { BreakdownSheet } from './breakdown-sheet'
 import { draftDate, type ExpenseDraft, ExpenseSheet, expenseSheetMode } from './expense-sheet'
 import { FillAmountSheet } from './fill-amount-sheet'
 import { groupByDate, pendingShownFor, sortByNewest, sortFixedRows } from './ordering'
 import { dateLong, lockBadgeText, lockMessage, monthShort, payerName, rowName, templateLabel } from './text'
 import { useExpenseMonth } from './use-expense-month'
-import { useOnline } from './use-online'
 
 type SheetState =
   | { kind: 'month' }
@@ -66,7 +68,8 @@ function noticeText(a: Attention): string {
   if (a.kind === 1) return `${monthShort(a.m)}の精算ができます`
   return a.amount > 0
     ? `${monthShort(a.m)}: 共用へ ${formatNumber(a.amount)}円 入れる`
-    : `${monthShort(a.m)}: 共用から ${formatNumber(a.amount)}円 受け取る`
+    : // 受け取る側は精算額が負なので、符号を落として出す（§3.5「8月: 共用から 4,930円 受け取る」）
+      `${monthShort(a.m)}: 共用から ${formatNumber(Math.abs(a.amount))}円 受け取る`
 }
 
 /** S-10 支出（§4 S-10）。データが届くまでは中身を出さない */
@@ -86,10 +89,26 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
   const [sheet, setSheet] = useState<SheetState>(null)
   const [message, setMessage] = useState<Message>(null)
   const [restoreDraft, setRestoreDraft] = useState<ExpenseDraft | null>(null)
+  /** S-15 を「元に戻す」で開き直すときの入力中の金額（S-14 の restoreDraft と同じ形） */
+  const [restoreDigits, setRestoreDigits] = useState<string | null>(null)
   const [fixedOpen, setFixedOpen] = useState(false)
+  /** 直したばかりの行（1.2秒だけ色を付ける。§7.5） */
+  const [justSaved, setJustSaved] = useState<string | null>(null)
+  const savedTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(savedTimer.current), [])
+
+  /** S-14・S-15 から保存した行に色を付ける（1.2秒。記録タブからの新規には付けない。§3.4） */
+  const markSaved = (id: string) => {
+    setJustSaved(id)
+    window.clearTimeout(savedTimer.current)
+    savedTimer.current = window.setTimeout(() => setJustSaved(null), 1200)
+  }
 
   const updateExpense = useUpdateExpense()
   const deleteExpense = useDeleteExpense()
+  // 未送信の行（§3.6）は DB にまだ無いので、端末の保留のほうを直す・消す
+  const updatePending = useUpdatePending()
+  const dropPending = useDropPending()
   const restoreExpense = useRestoreExpense()
   const fillAmount = useFillAmount()
   const setSkipped = useSetSkipped()
@@ -135,11 +154,13 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
     toast.hide()
     setMessage(null)
     setRestoreDraft(null)
+    setRestoreDigits(null)
     setSheet(next)
   }
   const closeSheet = () => {
     setMessage(null)
     setRestoreDraft(null)
+    setRestoreDigits(null)
     setSheet(null)
   }
 
@@ -167,11 +188,38 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
 
   /* ---- S-14 の操作 ------------------------------------------------ */
 
+  /**
+   * 保存（S-14）。止まったときは **シートを開いたまま** その場の1行で伝える（§1.4）。
+   * 包まないと、断られたときにシートが開いたまま何も起きず、押しても無反応に見える。
+   */
   const saveExpense = async (e: Expense, draft: ExpenseDraft, mode: string) => {
+    try {
+      await runSave(e, draft, mode)
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : '保存できませんでした', tone: 'error' })
+    }
+  }
+
+  const runSave = async (e: Expense, draft: ExpenseDraft, mode: string) => {
     const date = draftDate(draft, now.slice(0, 10))
     const nextMonth = monthOf(date)
-    if (blocked([mode === 'unsent' ? null : e.month, mode === 'fixed' ? null : nextMonth])) return
+    // 未送信の行はオフラインでも直せる（端末の保留を書き換えるだけ。§3.6）。移す先の月が精算中かは見る
+    if (blocked([mode === 'unsent' ? null : e.month, mode === 'fixed' ? null : nextMonth], mode === 'unsent')) return
     const amount = Number(draft.digits || 0)
+
+    // 未送信の行は DB に無い。端末の保留を同じ id で置き換える（送り直しても二重にならない。§3.6）
+    if (mode === 'unsent') {
+      const before = { id: e.id, date: e.date, cat: e.cat, amount: e.amount ?? 0, payer: e.payer, memo: e.memo }
+      await updatePending.mutateAsync({
+        id: e.id,
+        input: { id: e.id, date, cat: draft.cat, amount, payer: draft.payer, memo: draft.memo.trim() },
+      })
+      closeSheet()
+      changeMonth(nextMonth)
+      markSaved(e.id)
+      toast.show({ text: '直しました', onUndo: () => updatePending.mutate({ id: e.id, input: before }) })
+      return
+    }
 
     if (mode === 'fixed') {
       const same = amount === e.amount && draft.payer === e.payer && !e.skipped
@@ -181,6 +229,7 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
       if (draft.payer !== e.payer) await updateExpense.mutateAsync({ id: e.id, patch: { payer: draft.payer } })
       if (e.skipped) await setSkipped.mutateAsync({ id: e.id, skipped: false })
       closeSheet()
+      markSaved(e.id)
       toast.show({
         text: '直しました',
         ...(before.amount !== null
@@ -215,6 +264,7 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
     })
     closeSheet()
     changeMonth(nextMonth)
+    markSaved(e.id)
     toast.show({
       text: '直しました',
       onUndo: () => updateExpense.mutate({ id: e.id, patch: before }),
@@ -223,6 +273,17 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
 
   const removeExpense = async (e: Expense, mode: string) => {
     if (blocked(mode === 'unsent' ? [] : [e.month], mode === 'unsent')) return
+    // 未送信の行は DB に無いので、端末の保留から消すだけ（元に戻すは同じ内容で置き直す）
+    if (mode === 'unsent') {
+      const before = { id: e.id, date: e.date, cat: e.cat, amount: e.amount ?? 0, payer: e.payer, memo: e.memo }
+      await dropPending.mutateAsync({ id: e.id })
+      closeSheet()
+      toast.show({
+        text: '削除しました',
+        onUndo: () => updatePending.mutate({ id: e.id, input: before }),
+      })
+      return
+    }
     await deleteExpense.mutateAsync({ id: e.id })
     closeSheet()
     toast.show({ text: '削除しました', onUndo: () => restoreExpense.mutate(e) })
@@ -244,6 +305,7 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
     if (blocked([e.month])) return
     await fillAmount.mutateAsync({ id: e.id, amount })
     closeSheet()
+    markSaved(e.id)
     // 元に戻す: 金額を「金額待ち」へ戻すデータ層の口がまだ無い（報告の「仕様書との食い違い」を参照）
     toast.show({ text: `${e.memo} ${formatNumber(amount)}円を入れました` })
   }
@@ -274,6 +336,7 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
         memo={memo}
         amount={e.skipped ? '今月はなし' : formatNumber(e.amount ?? 0)}
         muted={e.skipped}
+        highlighted={e.id === justSaved}
         badge={
           <Flex gap={1}>
             {newIds.current?.has(e.id) ? <Badge>新着</Badge> : null}
@@ -501,6 +564,7 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
           canDefer={canDeferRow(d, openPending, now)}
           progress={null}
           message={message}
+          initialDigits={restoreDigits}
           onFill={(amount) => {
             void fillRow(openPending, amount)
           }}
@@ -512,9 +576,19 @@ function ExpensesTab({ d, now, viewer }: { d: HouseholdData; now: DateTimeKey; v
             void skipRow(openPending)
           }}
           onClose={(result) => {
+            const id = openPending.id
             setSheet(null)
             setMessage(null)
-            if (result.dirty) toast.show({ text: '入力をやめました' })
+            setRestoreDigits(null)
+            if (result.dirty) {
+              toast.show({
+                text: '入力をやめました',
+                onUndo: () => {
+                  setRestoreDigits(result.digits)
+                  setSheet({ kind: 'fill', id })
+                },
+              })
+            }
           }}
         />
       ) : null}

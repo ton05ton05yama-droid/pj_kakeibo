@@ -1,6 +1,6 @@
 import { Box } from '@chakra-ui/react'
 import { useId, useRef } from 'react'
-import { BottomSheet, IconButton, InlineMessage, PrimaryButton, SheetHeader } from '@/components'
+import { BottomSheet, IconButton, InlineMessage, PrimaryButton } from '@/components'
 import { LabelBox } from '@/components/primitives'
 import { BareInput, Field } from './settings-ui'
 import type { PasswordDraft } from './sheets'
@@ -60,10 +60,8 @@ export function PasswordSheet({ draft, onDraft, onClose, onDone, online, actions
       }
     >
       <Box data-screen='S-34' data-state={draft.err ? 'action' : 'normal'}>
-        <Box mt={1}>
-          <SheetHeader>
-            <LabelBox htmlFor={id}>パスワードを変える</LabelBox>
-          </SheetHeader>
+        <Box as='h2' mt={1} fontSize='xl' fontWeight='bold' lineHeight='tight'>
+          <LabelBox htmlFor={id}>パスワードを変える</LabelBox>
         </Box>
         <Field>
           <BareInput

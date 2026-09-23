@@ -68,7 +68,7 @@ export function OnboardingScreen() {
 
   return (
     <Page withTabBar={false}>
-      <FormBox data-screen='S-02' data-state={message === null ? 'normal' : 'action'} onSubmit={submit} py={10}>
+      <FormBox data-screen='S-02' data-state={message === null ? 'normal' : 'action'} onSubmit={submit} pt={10} pb={6}>
         {/* 一番大きく見せるもの: アバター 56px（入力に合わせて頭文字が変わる） */}
         <Flex justifyContent='center'>
           <Avatar who={me.color} name={value} size='lg' />

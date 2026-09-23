@@ -291,13 +291,35 @@ describe('S-33 人の設定', () => {
     return repository
   }
 
-  it('相手の行からも開いて直せる（呼び名・色・出す割合）', async () => {
+  it('自分の行は呼び名・色・出す割合・給料の入り先を直せる（§2.2）', async () => {
+    await openPerson(/まさと（自分）/)
+    const dialog = await screen.findByRole('dialog', { name: '人の設定（まさと）' })
+    expect(within(dialog).getByLabelText('呼び名')).toHaveValue('まさと')
+    expect(within(dialog).getByLabelText('出す割合')).toHaveValue('40')
+    expect(within(dialog).getByRole('radio', { name: 'ティール' })).toBeChecked()
+    // 給料の入り先の既定は「自分の口座」（§9 の見本データ）
+    const salary = within(dialog).getByRole('radiogroup', { name: '給料の入り先' })
+    expect(within(salary).getByRole('radio', { name: '自分の口座' })).toBeChecked()
+    expect(within(dialog).getByText('割合は次に決める月から、給料の入り先は決め直した月から')).toBeInTheDocument()
+    expect(document.querySelector('[data-screen="S-33"]')).toHaveAttribute('data-state', 'normal')
+  })
+
+  it('相手の行は呼び名と色だけ直せて、出す割合と給料の入り先は値の表示になる（§2.2）', async () => {
     await openPerson(/りさこ/)
     const dialog = await screen.findByRole('dialog', { name: '人の設定（りさこ）' })
+    // 呼び名と色は2人とも（相手の打ち間違いを直せるようにするため）
     expect(within(dialog).getByLabelText('呼び名')).toHaveValue('りさこ')
-    expect(within(dialog).getByLabelText('出す割合')).toHaveValue('40')
     expect(within(dialog).getByRole('radio', { name: 'アンバー' })).toBeChecked()
-    expect(within(dialog).getByText('割合の変更は、出す額をまだ決めていない月から')).toBeInTheDocument()
+    // 出す割合と給料の入り先は本人だけ。押せないボタンを作らない（P7）ので値だけ出す
+    expect(within(dialog).queryByLabelText('出す割合')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('radiogroup', { name: '給料の入り先' })).not.toBeInTheDocument()
+    expect(within(dialog).getByText('出す割合')).toBeInTheDocument()
+    expect(within(dialog).getByText('40%')).toBeInTheDocument()
+    expect(within(dialog).getByText('給料の入り先')).toBeInTheDocument()
+    expect(within(dialog).getByText('自分の口座')).toBeInTheDocument()
+    expect(within(dialog).getByText('本人だけが変えられます')).toBeInTheDocument()
+    expect(within(dialog).queryByText('割合は次に決める月から、給料の入り先は決め直した月から')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-screen="S-33"]')).toHaveAttribute('data-state', 'partner')
   })
 
   it('呼び名と割合を確かめる（空・7文字以上・0〜100の外）', async () => {
@@ -323,15 +345,51 @@ describe('S-33 人の設定', () => {
   })
 
   it('保存すると呼び名と割合が変わり、トースト「保存しました」が出る', async () => {
-    const repository = await openPerson(/りさこ/)
-    const dialog = await screen.findByRole('dialog', { name: '人の設定（りさこ）' })
+    const repository = await openPerson(/まさと（自分）/)
+    const dialog = await screen.findByRole('dialog', { name: '人の設定（まさと）' })
+    const name = within(dialog).getByLabelText('呼び名')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'まさ')
     const rate = within(dialog).getByLabelText('出す割合')
     await userEvent.clear(rate)
     await userEvent.type(rate, '45')
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     expect(await screen.findByText('保存しました')).toBeInTheDocument()
     const snapshot = await repository.loadSnapshot()
-    expect(snapshot.data.people.b.ratePct).toBe(45)
+    expect(snapshot.data.people.a.name).toBe('まさ')
+    expect(snapshot.data.people.a.ratePct).toBe(45)
+  })
+
+  it('相手の行で保存しても、相手の出す割合は変わらない（§2.2）', async () => {
+    const repository = await openPerson(/りさこ/)
+    const dialog = await screen.findByRole('dialog', { name: '人の設定（りさこ）' })
+    const name = within(dialog).getByLabelText('呼び名')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'りさ')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('保存しました')).toBeInTheDocument()
+    const snapshot = await repository.loadSnapshot()
+    expect(snapshot.data.people.b.name).toBe('りさ')
+    expect(snapshot.data.people.b.ratePct).toBe(40)
+    expect(snapshot.data.people.b.salaryToJoint).toBe(false)
+  })
+
+  it('給料の入り先を「共用口座」にすると、トーストで何を変えたかが分かり、元に戻せる（S-33）', async () => {
+    const repository = await openPerson(/まさと（自分）/)
+    const dialog = await screen.findByRole('dialog', { name: '人の設定（まさと）' })
+    const salary = within(dialog).getByRole('radiogroup', { name: '給料の入り先' })
+    await userEvent.click(within(salary).getByRole('radio', { name: '共用口座' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('給料の入り先を『共用口座』にしました')).toBeInTheDocument()
+    await waitFor(async () => {
+      expect((await repository.loadSnapshot()).data.people.a.salaryToJoint).toBe(true)
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: '元に戻す' }))
+    await waitFor(async () => {
+      expect((await repository.loadSnapshot()).data.people.a.salaryToJoint).toBe(false)
+    })
   })
 
   it('色を選ぶと相手は残りの色になる', async () => {

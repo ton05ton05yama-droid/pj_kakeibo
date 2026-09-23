@@ -48,8 +48,10 @@ export interface PersonDraft {
   person: PersonKey
   name: string
   color: PersonKey
-  /** 入力のままの割合 */
+  /** 入力のままの割合（**本人の行だけ**変えられる。§2.2） */
   rate: string
+  /** 給料の入り先（true = 共用口座。**本人の行だけ**変えられる。§2.2） */
+  salaryToJoint: boolean
   err: SheetError | null
   dirty: boolean
 }
@@ -104,7 +106,16 @@ export function editTemplateDraft(t: FixedCostTemplate): TemplateDraft {
 }
 
 export function personDraft(person: PersonKey, p: Person): PersonDraft {
-  return { id: 'S-33', person, name: p.name, color: p.color, rate: String(p.ratePct), err: null, dirty: false }
+  return {
+    id: 'S-33',
+    person,
+    name: p.name,
+    color: p.color,
+    rate: String(p.ratePct),
+    salaryToJoint: p.salaryToJoint,
+    err: null,
+    dirty: false,
+  }
 }
 
 export function passwordDraft(): PasswordDraft {

@@ -78,6 +78,9 @@ describe('ケースC 0円の人がいる', () => {
     const { data, now } = buildCaseData(findCase('C0'))
     const md = settleModel(data, '2026-09', now)
     expect(md.settle).toEqual(EXPECT.cases.C0.settle)
+    // 2人とも 0円でも共用は 1万円足りない（動かす額と共用の過不足は別もの。§6.2）
+    expect(md.jointNet).toBe(EXPECT.cases.C0.jointNet)
+    expect(jointNetKindOf(md.jointNet ?? 0)).toBe('draw')
     expect(confirmMonth(data, '2026-09', 'a', now)).toBe('settled')
     expect(monthStatus(data, '2026-09', now)).toBe('settled')
   })

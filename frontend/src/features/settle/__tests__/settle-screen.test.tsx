@@ -5,6 +5,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
+import { App } from '@/app/app'
+import { AuthProvider } from '@/app/providers/auth-provider'
 import { setRepository } from '@/data'
 import { SettleScreen } from '../settle-screen'
 import { renderWithProviders, signIn } from './helpers'
@@ -206,6 +208,18 @@ describe('S-22 見込みのとき（§4 S-22）', () => {
   })
 })
 
+describe('S-20 支出タブから月を渡して開く', () => {
+  it("state: { month: '2026-08' } で /settle を開くと8月が出る", async () => {
+    await signIn('sep-open')
+    renderWithProviders(<SettleScreen />, [{ pathname: '/settle', state: { month: '2026-08' } }])
+    await waitForStatus(/精算済み/)
+
+    expect(screen.getByRole('button', { name: '2026年8月（月を選ぶ）' })).toBeInTheDocument()
+    // 既定の月（9月）は開かない
+    expect(screen.queryByText('見込み・9/22時点')).not.toBeInTheDocument()
+  })
+})
+
 describe('S-04 月を選ぶ（精算タブから開く）', () => {
   it('支出タブと同じ共通部品が開き、S-04 の目印と 12 か月のマスが出る（§4 S-04）', async () => {
     await signIn('sep-open')
@@ -237,5 +251,66 @@ describe('S-04 月を選ぶ（精算タブから開く）', () => {
 
     expect(screen.queryByRole('dialog', { name: '月を選ぶ' })).not.toBeInTheDocument()
     expect(screen.getByText(/精算済み/)).toBeInTheDocument()
+  })
+})
+
+describe('S-20 `prep` → ［金額を入れる］（§2.3 E1・§4 S-15 `action`）', () => {
+  /**
+   * S-15 をつないでいるのはアプリ側（`app/app.tsx`）なので、ここだけ `App` ごと出す。
+   * 見本データは `sep-open`（2026-09-22。金額待ちが ガス代・電気代 の2件）。
+   */
+  async function openPrep(): Promise<void> {
+    await signIn('sep-open')
+    renderWithProviders(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    )
+    await waitForStatus('見込み・9/22時点')
+    await userEvent.click(screen.getByRole('button', { name: 'この月を精算する' }))
+    await userEvent.click(screen.getByRole('button', { name: '金額を入れる' }))
+  }
+
+  /** 2件とも金額を入れる（ガス代 6,200 → 電気代 9,000。§9.6 V3 の確定値になる） */
+  async function fillBoth(): Promise<void> {
+    const first = await screen.findByRole('dialog', { name: '金額を入れる（ガス代（9月分））' })
+    await userEvent.click(within(first).getByRole('button', { name: '6' }))
+    await userEvent.click(within(first).getByRole('button', { name: '2' }))
+    await userEvent.click(within(first).getByRole('button', { name: 'ゼロゼロ' }))
+    await userEvent.click(within(first).getByRole('button', { name: '次へ' }))
+
+    const second = await screen.findByRole('dialog', { name: '金額を入れる（電気代（9月分））' })
+    await userEvent.click(within(second).getByRole('button', { name: '9' }))
+    await userEvent.click(within(second).getByRole('button', { name: 'ゼロゼロ' }))
+    await userEvent.click(within(second).getByRole('button', { name: '0' }))
+    await userEvent.click(within(second).getByRole('button', { name: '入れる' }))
+  }
+
+  it('2件片付けると S-20 が `ready` になり、トーストは1つだけ出る（§3.7）', async () => {
+    await openPrep()
+    await fillBoth()
+
+    // 最後の操作のぶんだけ（途中の［次へ］では出さない）
+    expect(await screen.findByText('電気代 9,000円を入れました')).toBeInTheDocument()
+    expect(screen.queryByText('ガス代 6,200円を入れました')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/円を入れました$/)).toHaveLength(1)
+    // シートは閉じて、押した元の S-20 が出ている
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitForStatus('精算できます')
+    expect(screen.getByRole('button', { name: 'この金額で精算' })).toBeInTheDocument()
+  })
+
+  it('月の途中の `prep` から片付け終わっても `estimate` に戻らない（タブを移さない。§6.3 ケースM）', async () => {
+    await openPrep()
+    // シートは精算タブの上に重なるだけで、支出タブへは移らない
+    expect(screen.queryByText('9月のふたりの支出')).not.toBeInTheDocument()
+
+    await fillBoth()
+
+    await waitForStatus('精算できます')
+    // ［この月を精算する］は押したままなので、見込みには戻らない
+    expect(screen.queryByText('見込み・9/22時点')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'この月を精算する' })).not.toBeInTheDocument()
+    expect(screen.queryByText('9月のふたりの支出')).not.toBeInTheDocument()
   })
 })

@@ -123,7 +123,7 @@ select test.eq('sep-open の赤い点（9月はまだ終わっていないので
 select test.eq('sep-open の精算タブの既定の月', public.app_status() ->> 'settle_default_month', '2026-09-01');
 reset role;
 
-\echo '### 月の途中の精算（04 §11 まだのこと・仕様書 §12.1 Q2）'
+\echo '### 月の途中の精算（仕様書 §12.1 Q2。04 §11 の確かめたこと）'
 select set_config('request.jwt.claim.sub', :'MA', false);
 set role authenticated;
 select test.eq('金額待ちが残っていれば止まる', public.settle_confirm('2026-09-01') ->> 'reason', 'pending');
@@ -198,6 +198,145 @@ select test.eq('sep-ready S-20 の状態', (select j->>'view_state' from sum_rea
 select test.eq('sep-ready 止まる理由なし', (select j->'blocker' from sum_ready), 'null'::jsonb);
 select test.eq('10月の金額待ち', (select (public.month_summary('2026-10-01') -> 'pending' ->> 'count')::int), 3);
 reset role;
+
+\echo '### 給料の入り先（仕様書 §6.2・§6.3 ケースN・§9.6 検算 V11。04 §11 の確かめたこと）'
+-- (1) 見本データの既定（2人とも「自分の口座」）では、今までの月の数字が変わらない（回帰）
+create temp table live_default as select private.month_live(:'H', '2026-09-01') as j;
+select test.eq('既定 共用の過不足（Σ出す額 − 支出合計）', (select (j->>'joint_net')::int from live_default), 1870);
+select test.eq('既定 共用の通帳の動き',     (select (j->>'joint_balance')::int from live_default), 1870);
+select test.eq('既定 共用に入った給料の合計', (select (j->>'salary_applied')::int from live_default), 0);
+select test.eq('既定 給料の残り',           (select (j->>'salary_remainder')::int from live_default), 0);
+select test.eq('既定 共用に入る人がいるか', (select (j->>'has_salary_to_joint')::boolean from live_default), false);
+select test.eq('既定 まさと 動かす額', (select (j->'members'->0->>'settlement')::int from live_default), 82490);
+select test.eq('既定 りさこ 動かす額', (select (j->'members'->1->>'settlement')::int from live_default), 65930);
+
+-- (2) りさこの給料が共用に入る月（仕様書 §6.3 ケースN）
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select test.eq('りさこが給料の入り先を共用にする', public.update_salary_to_joint(true) ->> 'salary_to_joint', 'true');
+select test.eq('9月を決め直す（決めてある行）', public.decide_contributions('2026-09-01', jsonb_build_object(:'RI', 220000)) ->> 'result', 'ok');
+reset role;
+-- 決め直すと、給料の入り先だけいまの設定を取り込む（事実。2026-09-23 の決定。04 §2.6）
+select test.eq('決め直すと決めた月の入り先はいまの設定になる',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'RI'), true);
+-- 割合は取り決めなので、決め直しても保存した値のまま
+select test.eq('決め直しても決めた月の割合は 40% のまま',
+  (select contribution_rate from public.month_contributions where month='2026-09-01' and user_id=:'RI')::int, 40);
+select test.eq('9月の入り先（りさこ）', (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'RI'), true);
+select test.eq('9月の出す額（りさこ）は変わらない', (select contribution from public.month_contributions where month='2026-09-01' and user_id=:'RI'), 88000);
+create temp table live_n as select private.month_live(:'H', '2026-09-01') as j;
+select test.eq('ケースN まさと 共用に入った給料', (select (j->'members'->0->>'joint_salary')::int from live_n), 0);
+select test.eq('ケースN まさと 動かす額',         (select (j->'members'->0->>'settlement')::int from live_n), 82490);
+select test.eq('ケースN りさこ 共用に入った給料', (select (j->'members'->1->>'joint_salary')::int from live_n), 88000);
+select test.eq('ケースN りさこ 動かす額（共用から受け取る）', (select (j->'members'->1->>'settlement')::int from live_n), -22070);
+select test.eq('ケースN 共用に入る給料',   (select (j->>'salary_in')::int from live_n), 220000);
+select test.eq('ケースN 給料の残り',       (select (j->>'salary_remainder')::int from live_n), 132000);
+select test.eq('ケースN 共用の過不足',     (select (j->>'joint_net')::int from live_n), 1870);
+select test.eq('ケースN 共用に残る額',     (select (j->>'joint_balance')::int from live_n), 133870);
+select test.eq('ケースN 共用に入る人がいる', (select (j->>'has_salary_to_joint')::boolean from live_n), true);
+select test.eq('検算 V11（共用の通帳の動き ＝ 共用の過不足 ＋ 給料の残り）',
+  (select (j->>'joint_balance')::int from live_n),
+  (select (j->>'joint_net')::int + (j->>'salary_remainder')::int from live_n));
+
+-- (3) 設定を戻しただけでは決めた月は動かない。動くのは決め直したとき（2026-09-23 の決定）
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select test.eq('りさこが入り先を自分の口座に戻す', public.update_salary_to_joint(false) ->> 'salary_to_joint', 'false');
+reset role;
+select test.eq('人の設定は自分の口座に戻った', (select salary_to_joint from public.household_members where user_id=:'RI'), false);
+select test.eq('決め直していない月の入り先は共用のまま',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'RI'), true);
+select test.eq('決め直していない月の動かす額も変わらない（りさこ）',
+  (private.month_live(:'H', '2026-09-01') -> 'members' -> 1 ->> 'settlement')::int, -22070);
+-- 決め直すと、いまの設定（自分の口座）になり、動かす額も戻る
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select test.eq('戻したあとに9月を決め直す', public.decide_contributions('2026-09-01', jsonb_build_object(:'RI', 220000)) ->> 'result', 'ok');
+reset role;
+select test.eq('決め直した月の入り先は自分の口座',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'RI'), false);
+select test.eq('決め直した月の割合は 40% のまま',
+  (select contribution_rate from public.month_contributions where month='2026-09-01' and user_id=:'RI')::int, 40);
+select test.eq('決め直した月の動かす額（りさこ）',
+  (private.month_live(:'H', '2026-09-01') -> 'members' -> 1 ->> 'settlement')::int, 65930);
+-- ケースN に戻す（設定を共用にしてから決め直す。以降は共用のまま進む）
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select test.eq('りさこが入り先を共用に戻す', public.update_salary_to_joint(true) ->> 'salary_to_joint', 'true');
+select test.eq('もう一度9月を決め直す', public.decide_contributions('2026-09-01', jsonb_build_object(:'RI', 220000)) ->> 'result', 'ok');
+reset role;
+select test.eq('決めた月の入り先は共用に戻った', (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'RI'), true);
+select test.eq('ケースN の動かす額（りさこ）',
+  (private.month_live(:'H', '2026-09-01') -> 'members' -> 1 ->> 'settlement')::int, -22070);
+
+-- (4) 出す割合・給料の入り先は本人だけ（仕様書 §2.2。2026-09-23）
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select test.eq('りさこが update_member でまさとの割合を送っても ok は返る',
+  public.update_member(:'MA', 'まさと', 'teal', 99::smallint) ->> 'result', 'ok');
+select test.eq('りさこが自分の割合を変える', (public.update_contribution_rate(45::smallint) ->> 'contribution_rate')::int, 45);
+select test.eq('りさこが自分の入り先を変える', (public.update_salary_to_joint(true) ->> 'salary_to_joint')::boolean, true);
+select test.fails('給料の入り先も直接書けない',
+  $$update public.household_members set salary_to_joint = true$$, 'permission denied');
+select test.fails('割合は 0〜100 だけ',        $$select public.update_contribution_rate(101::smallint)$$, 'bad_rate');
+select test.fails('割合に null は渡せない',    $$select public.update_contribution_rate(null::smallint)$$, 'bad_rate');
+select test.fails('入り先に null は渡せない',  $$select public.update_salary_to_joint(null::boolean)$$, 'bad_salary_to_joint');
+select test.fails('update_member の割合も 0〜100 だけ',
+  $$select public.update_member('00000000-0000-0000-0000-00000000000b', 'りさこ', 'amber', 101::smallint)$$, 'bad_rate');
+reset role;
+select test.eq('まさとの割合は 40 のまま',       (select contribution_rate from public.household_members where user_id=:'MA')::int, 40);
+select test.eq('まさとの入り先は自分の口座のまま', (select salary_to_joint from public.household_members where user_id=:'MA'), false);
+select test.eq('変わったのはりさこの行だけ（割合）',   (select contribution_rate from public.household_members where user_id=:'RI')::int, 45);
+select test.eq('変わったのはりさこの行だけ（入り先）', (select salary_to_joint from public.household_members where user_id=:'RI'), true);
+
+-- (5) 精算したあと（ロック中）も同じ式で出る。決めたときに保存した値で固まる（仕様書 §6.1 の11・§6.3 ケースN）
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
+select test.eq('ケースN のまま9月を精算する', public.settle_confirm('2026-09-01') ->> 'result', 'ok');
+create temp table sum_n as select public.month_summary('2026-09-01') as j;
+reset role;
+select test.eq('ロック後 支出合計',   (select (j->'joint'->>'expense_total')::int from sum_n), 206130);
+select test.eq('ロック後 共用払い',   (select (j->'joint'->>'joint_paid')::int from sum_n), 146550);
+select test.eq('ロック後 共用に入る給料',         (select (j->'joint'->>'salary_in')::int from sum_n), 220000);
+select test.eq('ロック後 共用に入った給料の合計', (select (j->'joint'->>'salary_applied')::int from sum_n), 88000);
+select test.eq('ロック後 給料の残り',             (select (j->'joint'->>'salary_remainder')::int from sum_n), 132000);
+select test.eq('ロック後 共用の過不足',           (select (j->'joint'->>'joint_net')::int from sum_n), 1870);
+select test.eq('ロック後 共用に残る額',           (select (j->'joint'->>'joint_balance')::int from sum_n), 133870);
+select test.eq('ロック後 共用に入る人がいる',     (select (j->'joint'->>'has_salary_to_joint')::boolean from sum_n), true);
+select test.eq('検算 V11（ロック後も 共用に残る額 ＝ 共用の過不足 ＋ 給料の残り）',
+  (select (j->'joint'->>'joint_balance')::int from sum_n),
+  (select (j->'joint'->>'joint_net')::int + (j->'joint'->>'salary_remainder')::int from sum_n));
+select test.eq('ロック後 まさと 共用に入った給料', (select (j->'members'->0->>'joint_salary')::int from sum_n), 0);
+select test.eq('ロック後 まさと 動かす額',         (select (j->'members'->0->>'settlement')::int from sum_n), 82490);
+select test.eq('ロック後 りさこ 共用に入った給料', (select (j->'members'->1->>'joint_salary')::int from sum_n), 88000);
+select test.eq('ロック後 りさこ 動かす額（共用から受け取る）', (select (j->'members'->1->>'settlement')::int from sum_n), -22070);
+-- ロックしたあとに人の設定を戻しても、精算中の月の数字は動かない（月ごとの保存）
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select test.eq('ロック中に入り先を自分の口座に戻す', public.update_salary_to_joint(false) ->> 'salary_to_joint', 'false');
+select test.eq('戻しても精算中の 共用に残る額は動かない',
+  (public.month_summary('2026-09-01') -> 'joint' ->> 'joint_balance')::int, 133870);
+reset role;
+-- 検証だけの後始末（ケースN の精算をなかったことにして、回を 1 に戻す）
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
+select test.eq('ケースN の精算をやり直す', public.settle_reopen('2026-09-01') ->> 'result', 'ok');
+reset role;
+delete from public.month_settlements where month = '2026-09-01';
+select test.eq('ケースN のあと 9月に精算の行は無い', (select count(*)::int from public.month_settlements where month='2026-09-01'), 0);
+
+-- 検証だけの後始末（見本データの既定に戻して、§9.8 の続き〈sep-transfer〉に入る）
+select set_config('request.jwt.claim.sub', :'RI', false);
+set role authenticated;
+select public.update_contribution_rate(40::smallint);
+select public.update_salary_to_joint(false);
+reset role;
+update public.month_contributions set salary_to_joint = false where month = '2026-09-01';
+create temp table live_back as select private.month_live(:'H', '2026-09-01') as j;
+select test.eq('後始末のあと まさと 動かす額', (select (j->'members'->0->>'settlement')::int from live_back), 82490);
+select test.eq('後始末のあと りさこ 動かす額', (select (j->'members'->1->>'settlement')::int from live_back), 65930);
+select test.eq('後始末のあと 共用の通帳の動き', (select (j->>'joint_balance')::int from live_back), 1870);
+select test.eq('後始末のあと りさこの割合', (select contribution_rate from public.household_members where user_id=:'RI')::int, 40);
 
 \echo '### sep-transfer（10/1 21:00 ［この金額で精算］）'
 select set_config('request.jwt.claim.sub', :'MA', false);
@@ -296,7 +435,7 @@ select test.fails('anon は month_summary を呼べない', $$select public.mont
 select test.eq('anon は ping だけ呼べる', public.ping(), 1);
 reset role;
 
-\echo '### 記録の既定の払った人（04 §11 まだのこと・仕様書 §12.1 Q3）'
+\echo '### 記録の既定の払った人（仕様書 §12.1 Q3。04 §11 の確かめたこと）'
 select test.eq('いる行の既定は self',
   (select count(*)::int from public.household_members where default_payer = 'self'), 2);
 select set_config('request.jwt.claim.sub', :'MA', false);
@@ -317,18 +456,28 @@ select public.update_member(:'MA', 'まさと', 'teal', 40::smallint);
 select public.update_default_payer('self');
 reset role;
 
-\echo '### 出す額の決め直しと元に戻す（保存した割合のまま）'
+\echo '### 出す額の決め直しと元に戻す（割合は保存した値のまま・入り先はいまの設定）'
 select set_config('request.jwt.claim.sub', :'MA', false);
 set role authenticated;
 select public.update_member(:'MA', 'まさと', 'teal', 50::smallint);
+select test.eq('まさとが入り先を共用にする', public.update_salary_to_joint(true) ->> 'salary_to_joint', 'true');
 select test.eq('9月を決め直す', public.decide_contributions('2026-09-01', jsonb_build_object(:'MA', 310000)) ->> 'result', 'ok');
 reset role;
 select test.eq('決め直しても割合は保存した40%のまま',
   (select contribution_rate from public.month_contributions where month='2026-09-01' and user_id=:'MA')::int, 40);
+select test.eq('決め直すと入り先はいまの設定（共用）になる',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'MA'), true);
 select test.eq('決め直した出す額', (select contribution from public.month_contributions where month='2026-09-01' and user_id=:'MA'), 124000);
+-- 元に戻すと、手取りだけでなく前の入り先にも戻る
 select set_config('request.jwt.claim.sub', :'MA', false);
 set role authenticated;
+select test.eq('まさとが入り先を自分の口座に戻す', public.update_salary_to_joint(false) ->> 'salary_to_joint', 'false');
 create temp table undo1 as select public.decide_contributions('2026-09-01', jsonb_build_object(:'MA', 999999)) as j;
+reset role;
+select test.eq('もう一度決め直すと入り先も自分の口座になる',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'MA'), false);
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
 select test.eq('元に戻す', public.undo_decide_contributions('2026-09-01',
   (select (j->'prev'->>'decided_at')::timestamptz from undo1)) ->> 'result', 'ok');
 select test.eq('2回目は戻せない', public.undo_decide_contributions('2026-09-01',
@@ -336,6 +485,17 @@ select test.eq('2回目は戻せない', public.undo_decide_contributions('2026-
 select public.update_member(:'MA', 'まさと', 'teal', 40::smallint);
 reset role;
 select test.eq('戻したあとの手取り', (select net_income from public.month_contributions where month='2026-09-01' and user_id=:'MA'), 310000);
+select test.eq('戻したあとの入り先は前の値（共用）',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'MA'), true);
+select test.eq('戻したあとも割合は 40% のまま',
+  (select contribution_rate from public.month_contributions where month='2026-09-01' and user_id=:'MA')::int, 40);
+-- 見本データの既定（自分の口座）に戻す。決め直しでいまの設定（false）が入る
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
+select test.eq('既定に戻すため9月を決め直す', public.decide_contributions('2026-09-01', jsonb_build_object(:'MA', 310000)) ->> 'result', 'ok');
+reset role;
+select test.eq('まさとの入り先は自分の口座に戻った',
+  (select salary_to_joint from public.month_contributions where month='2026-09-01' and user_id=:'MA'), false);
 
 \echo '### 毎月の支払いをやめる・追加を元に戻す'
 select set_config('request.jwt.claim.sub', :'MA', false);

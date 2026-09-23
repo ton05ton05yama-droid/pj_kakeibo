@@ -82,7 +82,7 @@ export type RpcResult<T, R extends string = never> = RpcOk<T> | RpcAlready<T> | 
 
 /** 書き込みの途中で止まったもの（例外。画面は §1.4 の1行を出す） */
 export class RepositoryError extends Error {
-  readonly code: 'month_locked' | 'fixed_row_immutable' | 'not_member' | 'offline' | 'unknown'
+  readonly code: 'month_locked' | 'fixed_row_immutable' | 'not_member' | 'not_allowed' | 'offline' | 'unknown'
   readonly detail: string | null
   constructor(code: RepositoryError['code'], message: string, detail: string | null = null) {
     super(message)
@@ -187,6 +187,10 @@ export interface Repository {
   pendingExpenses(): Promise<Expense[]>
   /** 保留中の記録を送る（送れなければ 'failed' にする。つながらないときは残す） */
   flushPending(): Promise<void>
+  /** 保留中の記録を端末から消す（S-14 `unsent` の［削除］。DB には何も送らない） */
+  dropPending(id: string): Promise<void>
+  /** 保留中の記録を直す（S-14 `unsent` の［保存］。同じ id で置き換える＝送り直しても二重にならない） */
+  updatePending(id: string, input: NewExpenseInput): Promise<void>
   /** 今月はなし（毎月の支払いの行だけ。`skipped` を指定する＝冪等） */
   setSkipped(id: string, skipped: boolean): Promise<Expense>
   /** 来月に回す（`undo` で1か月戻す） */
@@ -232,8 +236,18 @@ export interface Repository {
 
   /* 設定（S-02・S-30・S-33） --------------------------------------- */
 
-  /** 呼び名・色・出す割合（2人とも変えられる。色を選ぶと相手は残りの色になる） */
-  updatePerson(person: PersonKey, patch: { name: string; color: PersonKey; ratePct: number }): Promise<void>
+  /**
+   * 呼び名・色（**2人とも**変えられる。色を選ぶと相手は残りの色になる。§2.2）。
+   *
+   * `ratePct` は **本人の行にだけ**効く。相手の行に渡しても出す割合は変わらない
+   * （2026-09-23 の決定。出す割合は本人だけ）。新しい画面は `updateContributionRate()` を使い、
+   * ここには呼び名と色だけを渡す。
+   */
+  updatePerson(person: PersonKey, patch: { name: string; color: PersonKey; ratePct?: number }): Promise<void>
+  /** 出す割合（**本人だけ**。S-33。`updateDefaultPayer` と同じ仕組み） */
+  updateContributionRate(ratePct: number): Promise<void>
+  /** 給料の入り先（**本人だけ**。S-33。true = 共用口座、false = 自分の口座） */
+  updateSalaryToJoint(salaryToJoint: boolean): Promise<void>
   /** 記録の既定の払った人（本人だけ） */
   updateDefaultPayer(value: 'self' | 'joint'): Promise<void>
   /** 支出タブを見た時刻（新着の判定） */

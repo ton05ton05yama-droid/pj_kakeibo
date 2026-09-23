@@ -4,15 +4,17 @@
  */
 import { ChakraProvider } from '@chakra-ui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AnnounceProvider } from '@/app/providers/announce-provider'
 import { ToastProvider } from '@/app/providers/toast-provider'
-import { createLocalRepository, setRepository } from '@/data'
+import { clearPending, createLocalRepository, PENDING_KEY, setRepository } from '@/data'
 import type { Repository } from '@/data/repository'
 import type { ScenarioId } from '@/domain'
+import { ExpensesScreen, forgetExpenseMonth } from '@/features/expense'
 import { system } from '@/theme'
 import { addDays, choiceForDate, formatDateWithWeekday, resolveDate } from '../date'
 import { lockedMessage, recordToastText } from '../messages'
@@ -46,6 +48,20 @@ async function openRecordTab(
   return repository
 }
 
+/** 同じ見本データにつないだ支出タブ（S-10）に出し直す（記録タブは閉じる） */
+async function openExpensesTab(): Promise<void> {
+  cleanup()
+  forgetExpenseMonth()
+  render(
+    wrap(
+      <MemoryRouter>
+        <ExpensesScreen />
+      </MemoryRouter>
+    )
+  )
+  await screen.findByRole('button', { name: /月を選ぶ/ })
+}
+
 /** 入力中の金額（「¥」だけ別の要素なので、要素の中身をまとめて見る） */
 function expectAmount(text: string): void {
   expect(screen.getAllByText((_content, el) => el?.textContent === text).length).toBeGreaterThan(0)
@@ -60,6 +76,7 @@ async function typeAmount(digits: string): Promise<void> {
 
 afterEach(() => {
   setRepository(null)
+  clearPending()
   Object.defineProperty(window.navigator, 'onLine', { value: true, configurable: true })
 })
 
@@ -235,6 +252,27 @@ describe('S-12 記録（いくら？）', () => {
     await typeAmount('1280')
     await userEvent.click(screen.getByRole('button', { name: '記録する' }))
     expect(await screen.findByText('日用品 1,280円（まさと）はつながったら送ります')).toBeInTheDocument()
+  })
+
+  it('オフラインの記録は端末にたまり、S-10 に「未送信」が出て合計に入らない（§9.6 V7）', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true })
+    const repository = await openRecordTab()
+    await userEvent.click(screen.getByRole('button', { name: '日用品' }))
+    await typeAmount('1280')
+    await userEvent.click(screen.getByRole('button', { name: '記録する' }))
+    await screen.findByText('日用品 1,280円（まさと）はつながったら送ります')
+
+    // 端末（localStorage）に1件だけたまる。送るのはつながってから（§3.6）
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(PENDING_KEY) ?? '[]')).toHaveLength(1))
+    const held = await repository.pendingExpenses()
+    expect(held).toHaveLength(1)
+    expect(held[0]).toMatchObject({ cat: 'household_goods', amount: 1280, payer: 'a', sync: 'pending' })
+
+    // S-10 では「未送信」のバッジと注記が出て、合計は §9.6 のまま動かない（V7）
+    await openExpensesTab()
+    expect(screen.getByText('¥180,670')).toBeInTheDocument()
+    expect(screen.getByText(/未送信 1件/)).toBeInTheDocument()
+    expect(screen.getByText('未送信')).toBeInTheDocument()
   })
 
   it('メモのチップを押すと入力欄になり、入れるとチップに出る', async () => {

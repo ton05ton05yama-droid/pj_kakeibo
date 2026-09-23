@@ -2,7 +2,7 @@ import { ChakraProvider } from '@chakra-ui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router'
+import { type InitialEntry, MemoryRouter } from 'react-router'
 import { AnnounceProvider } from '@/app/providers/announce-provider'
 import { ToastProvider } from '@/app/providers/toast-provider'
 import { createLocalRepository, type Repository, setRepository } from '@/data'
@@ -19,7 +19,8 @@ export async function signIn(scenario: ScenarioId, who: 'masato' | 'risako' = 'm
   return repository
 }
 
-export function renderWithProviders(ui: ReactNode) {
+/** `initialEntries` を渡すと、支出タブから月を渡して開いた状態（`state: { month }`）を作れる */
+export function renderWithProviders(ui: ReactNode, initialEntries: InitialEntry[] = ['/settle']) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 }, mutations: { retry: false } },
   })
@@ -28,7 +29,7 @@ export function renderWithProviders(ui: ReactNode) {
       <QueryClientProvider client={client}>
         <AnnounceProvider>
           <ToastProvider>
-            <MemoryRouter initialEntries={['/settle']}>{ui}</MemoryRouter>
+            <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
           </ToastProvider>
         </AnnounceProvider>
       </QueryClientProvider>

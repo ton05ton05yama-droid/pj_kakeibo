@@ -17,13 +17,29 @@ const UID_B = '22222222-2222-4222-8222-222222222222'
 
 const CONFIG = { url: 'https://example.invalid', publishableKey: 'publishable', emailDomain: 'kakeibo.invalid' }
 
-/** つながらないときに supabase-js が返すエラー */
-const OFFLINE_ERROR = { message: 'TypeError: Failed to fetch' }
-
 interface PostgrestLikeError {
   message: string
   code?: string
   details?: string | null
+}
+
+/**
+ * つながらないときに supabase-js が返すエラー。文面はブラウザで違う
+ * （Chrome/Edge は 'Failed to fetch'、Safari は 'Load failed'）ので、両方で確かめる。
+ */
+const OFFLINE_FETCH: PostgrestLikeError = { message: 'TypeError: Failed to fetch' }
+const OFFLINE_LOAD: PostgrestLikeError = { message: 'TypeError: Load failed' }
+const OFFLINE_ERRORS: readonly PostgrestLikeError[] = [OFFLINE_FETCH, OFFLINE_LOAD]
+
+/** RLS の with check / using に弾かれたとき（Postgres の 42501） */
+const RLS_ERROR: PostgrestLikeError = {
+  code: '42501',
+  message: 'new row violates row-level security policy for table "expenses"',
+}
+/** `.single()` が 0 件だったとき（相手の行・その月が精算中で読めない） */
+const NO_ROW_ERROR: PostgrestLikeError = {
+  code: 'PGRST116',
+  message: 'JSON object requested, multiple (or no) rows returned',
 }
 
 interface QueryOutcome {
@@ -57,6 +73,7 @@ const TABLES: Record<string, Record<string, unknown>[]> = {
       display_name: 'まさと',
       color: 'teal',
       contribution_rate: 40,
+      salary_to_joint: false,
       default_payer: 'self',
     },
     {
@@ -66,6 +83,7 @@ const TABLES: Record<string, Record<string, unknown>[]> = {
       display_name: 'りさこ',
       color: 'amber',
       contribution_rate: 40,
+      salary_to_joint: false,
       default_payer: 'self',
     },
   ],
@@ -115,6 +133,10 @@ interface FakeOptions {
   tableError?: () => PostgrestLikeError | null
   /** つながらない状態にする */
   offline?: () => boolean
+  /** つながらないときに返す文面（既定は Chrome の 'Failed to fetch'） */
+  offlineError?: PostgrestLikeError
+  /** 書き込みが1行も通らなかった（RLS の using に合う行が0件。エラーは出ない） */
+  writeNone?: () => boolean
   signInError?: { message: string; status?: number }
 }
 
@@ -133,9 +155,11 @@ function createQuery(table: string, options: FakeOptions, calls: FakeCalls): unk
   let mutating = false
 
   const outcome = (): QueryOutcome => {
-    if (options.offline?.() === true) return { data: null, error: OFFLINE_ERROR }
+    if (options.offline?.() === true) return { data: null, error: options.offlineError ?? OFFLINE_FETCH }
     const error = mutating ? (options.tableError?.() ?? null) : null
     if (error !== null) return { data: null, error }
+    // delete / update は、RLS に合う行が無くてもエラーにならない（0件が返るだけ）
+    if (mutating && options.writeNone?.() === true) return { data: single ? null : [], error: null }
     if (write !== null) {
       const row = { ...(BASE_ROWS[table] ?? {}), ...write }
       return { data: single ? row : [row], error: null }
@@ -183,7 +207,7 @@ function createFakeClient(options: FakeOptions = {}): { client: SupabaseClient; 
     from: (table: string) => createQuery(table, options, calls),
     rpc: async (name: string, args: Record<string, unknown> = {}) => {
       calls.rpc.push({ name, args })
-      if (options.offline?.() === true) return { data: null, error: OFFLINE_ERROR }
+      if (options.offline?.() === true) return { data: null, error: options.offlineError ?? OFFLINE_FETCH }
       if (name === 'app_status') return { data: APP_STATUS, error: null }
       return { data: options.rpc?.(name, args) ?? { result: 'ok' }, error: null }
     },
@@ -221,6 +245,39 @@ describe('Supabase 実装: 読み込み', () => {
     expect(snapshot.data.household.createdMonth).toBe('2026-08')
     expect(snapshot.data.expenses).toHaveLength(1)
     expect(snapshot.onboardedAt).toBe('2026-08-01T21:00')
+  })
+})
+
+describe('Supabase 実装: 人の設定の書き込み（§2.2。RPC の名前と引数は 0008_salary_to_joint.sql）', () => {
+  /** 送った RPC のうち、その名前の最後の1回 */
+  const lastRpc = (calls: FakeCalls, name: string) => calls.rpc.filter((c) => c.name === name).at(-1)
+
+  it('給料の入り先は update_salary_to_joint（本人の行だけを直す RPC）', async () => {
+    const { repository, calls } = await loaded()
+    await repository.updateSalaryToJoint(true)
+    expect(lastRpc(calls, 'update_salary_to_joint')).toEqual({
+      name: 'update_salary_to_joint',
+      args: { p_salary_to_joint: true },
+    })
+  })
+
+  it('出す割合は update_contribution_rate（本人の行だけを直す RPC）', async () => {
+    const { repository, calls } = await loaded()
+    await repository.updateContributionRate(45)
+    expect(lastRpc(calls, 'update_contribution_rate')).toEqual({
+      name: 'update_contribution_rate',
+      args: { p_rate: 45 },
+    })
+  })
+
+  it('相手の行の呼び名・色を直すときは割合を送らない（p_rate は null）', async () => {
+    const { repository, calls } = await loaded()
+    // S-33 で相手の行を開いたとき（出す割合と給料の入り先は読み取り専用。§2.2）
+    await repository.updatePerson('b', { name: 'りさこ', color: 'b' })
+    expect(lastRpc(calls, 'update_member')).toEqual({
+      name: 'update_member',
+      args: { p_user_id: UID_B, p_display_name: 'りさこ', p_color: 'amber', p_rate: null },
+    })
   })
 })
 
@@ -275,11 +332,32 @@ describe('Supabase 実装: blocked の detail をそろえる（D2）', () => {
 })
 
 describe('Supabase 実装: エラーを画面の1行に変える', () => {
-  it('その月が精算中なら month_locked（§1.4）', async () => {
-    const { repository } = await loaded({ tableError: () => ({ message: 'month_locked', details: '2026-09-01' }) })
+  it('精算中の月に記録を足すと RLS に弾かれる（42501 → not_allowed）', async () => {
+    // RLS の with check に `not is_month_locked(...)` が入っているので、
+    // トリガーの month_locked より先に 42501 で返る。理由は呼び出し側が手元の monthStatus で決める
+    const { repository } = await loaded({ tableError: () => RLS_ERROR })
     await expect(
       repository.addExpense({ id: 'x1', date: '2026-09-15', cat: 'dining', amount: 1000, payer: 'joint', memo: '' })
-    ).rejects.toMatchObject({ name: 'RepositoryError', code: 'month_locked', detail: '2026-09-01' })
+    ).rejects.toMatchObject({ name: 'RepositoryError', code: 'not_allowed' })
+  })
+
+  it('行が1つも読めないとき（PGRST116）も not_allowed', async () => {
+    const { repository } = await loaded({ tableError: () => NO_ROW_ERROR })
+    await expect(repository.updateExpense('e1', { amount: 1 })).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'not_allowed',
+      message: '相手の記録は直せません',
+    })
+  })
+
+  it('トリガーの month_locked はそのまま month_locked（§1.4）', async () => {
+    // 消すときはトリガーが先に上がる（04 §7）
+    const { repository } = await loaded({ tableError: () => ({ message: 'month_locked', details: '2026-09-01' }) })
+    await expect(repository.deleteExpense('e1')).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'month_locked',
+      detail: '2026-09-01',
+    })
   })
 
   it('毎月の支払いの行は直せない（fixed_row_immutable）', async () => {
@@ -289,24 +367,52 @@ describe('Supabase 実装: エラーを画面の1行に変える', () => {
     })
   })
 
-  it('つながらないときは offline', async () => {
-    let offline = false
-    const { repository } = await loaded({ offline: () => offline })
-    offline = true
-    await expect(repository.setCheck('2026-09', 'a', true)).rejects.toMatchObject({ code: 'offline' })
+  it('相手の記録を消そうとすると断られる（delete が0件を返す）', async () => {
+    const { repository } = await loaded({ writeNone: () => true })
+    await expect(repository.deleteExpense('e1')).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'not_allowed',
+      message: 'この記録は消せません',
+    })
   })
+
+  it('相手の記録を直そうとすると断られる（update が行を返さない）', async () => {
+    const { repository } = await loaded({ writeNone: () => true })
+    await expect(repository.updateExpense('e1', { amount: 1 })).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'not_allowed',
+      message: '相手の記録は直せません',
+    })
+  })
+
+  it('JWT の期限切れ（PGRST301）は offline ではなくログインし直し', async () => {
+    const { repository } = await loaded({ tableError: () => ({ code: 'PGRST301', message: 'JWT expired' }) })
+    await expect(repository.updateExpense('e1', { amount: 1 })).rejects.toMatchObject({
+      code: 'not_allowed',
+      message: 'ログインし直してください',
+    })
+  })
+
+  for (const error of OFFLINE_ERRORS) {
+    it(`つながらないときは offline（${error.message}）`, async () => {
+      let offline = false
+      const { repository } = await loaded({ offline: () => offline, offlineError: error })
+      offline = true
+      await expect(repository.setCheck('2026-09', 'a', true)).rejects.toMatchObject({ code: 'offline' })
+    })
+
+    it(`ログインでつながらないときは offline（${error.message}）`, async () => {
+      const { client } = createFakeClient({ signInError: error })
+      const repository = createSupabaseRepository(CONFIG, client)
+      await expect(repository.auth.signIn('masato', 'x')).rejects.toMatchObject({ code: 'offline' })
+    })
+  }
 
   it('ID かパスワードが違えば AuthError（S-01）', async () => {
     const { client } = createFakeClient({ signInError: { message: 'Invalid login credentials', status: 400 } })
     const repository = createSupabaseRepository(CONFIG, client)
     await expect(repository.auth.signIn('masato', 'x')).rejects.toBeInstanceOf(AuthError)
     await expect(repository.auth.signIn('masato', 'x')).rejects.toMatchObject({ code: 'invalid_credentials' })
-  })
-
-  it('ログインでつながらないときは offline', async () => {
-    const { client } = createFakeClient({ signInError: OFFLINE_ERROR })
-    const repository = createSupabaseRepository(CONFIG, client)
-    await expect(repository.auth.signIn('masato', 'x')).rejects.toMatchObject({ code: 'offline' })
   })
 })
 

@@ -26,6 +26,9 @@ pnpm dev        # http://localhost:5173
 | `pnpm lint` / `pnpm lint:fix` | biome（形も直す） |
 | `pnpm format` | biome の整形だけ |
 | `pnpm test` / `pnpm test:run` | vitest（見張り／1回だけ） |
+| `pnpm test:sql` | `supabase/migrations` を Postgres に当てて見本データで確かめる（04 §11） |
+
+`pnpm test:sql` は **Docker が要る**（Supabase の Postgres イメージを動かす）。Supabase プロジェクトは不要。
 
 `/__components` は**開発のときだけ**出る共通部品の見本（アプリの画面ではない）。
 
@@ -40,6 +43,9 @@ pnpm dev        # http://localhost:5173
 | `VITE_AUTH_EMAIL_DOMAIN` | ID を擬似メールに変えるときのドメイン |
 
 URL と key がそろっていれば Supabase の実装を使い、無ければ**仕様書 §9 の見本データを使うローカル実装**で動く（`src/data/index.ts` の `hasSupabaseConfig()`）。
+
+`.env.local` に値があると Supabase 実装になる。空ならローカル実装（見本データ）。
+
 secret key・DB の接続文字列は `VITE_` の変数に置かない。
 
 ## デプロイ（Vercel）
@@ -47,6 +53,8 @@ secret key・DB の接続文字列は `VITE_` の変数に置かない。
 `vercel.json` に SPA の rewrite（静的ファイル以外は `/index.html` へ）を置いてある。
 これ以外の **Root Directory = `frontend` ／ Framework = Vite ／ Output = `dist`** は
 Vercel のダッシュボードで入れる設定（`docs/05_platform.md` §5.2）。まだデプロイはしていない。
+
+Node 22.12 以上（手元は 24.18）。`package.json` の `engines` に書いてある。
 
 ## 置き場所
 

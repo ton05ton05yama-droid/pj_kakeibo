@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, Route, Routes, useNavigate } from 'react-router'
+import { Navigate, Route, Routes } from 'react-router'
 import { useAuth } from '@/app/providers'
 import { useHousehold } from '@/data'
 import type { Expense } from '@/domain'
@@ -39,15 +39,17 @@ function SignedIn() {
  * シート（S-03・S-04・S-12〜S-15・S-21・S-22・S-32〜S-34）はルートにせず、各画面の状態で持つ（§4.0.3）。
  */
 function Tabs() {
-  const navigate = useNavigate()
-  // 精算（S-20 `prep`）から渡された金額待ちの行。タブをまたぐのでここで持つ（§2.3 E1）
+  // 精算（S-20 `prep`）から渡された金額待ちの行。`FillPendingQueue` はルートの外に置くので、
+  // どのタブにいても S-15 を重ねられる（§2.3 E1）
   const [fillQueue, setFillQueue] = useState<readonly string[] | null>(null)
 
-  /** ［金額を入れる］。支出タブへ移してから S-15 を順に開く */
+  /**
+   * ［金額を入れる］。**タブは移さず**、いま見ているタブ（精算タブ）の上に S-15 を順に重ねる。
+   * 片付け終わると S-15 が閉じるだけで、押した元の S-20 にそのまま戻る（§4 S-15 `action`）。
+   */
   const startFill = (queue: readonly Expense[]): void => {
     if (queue.length === 0) return
     setFillQueue(queue.map((e) => e.id))
-    navigate('/expenses')
   }
 
   return (

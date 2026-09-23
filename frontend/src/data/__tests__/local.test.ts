@@ -117,12 +117,78 @@ describe('ローカル実装', () => {
     await expect(repository.deleteExpense('s22')).rejects.toThrow()
   })
 
+  it('毎月の支払いの行の払った人は相手も変えられる（§2.2）', async () => {
+    const repository = createLocalRepository('sep-open')
+    // s01 家賃（毎月の支払いの行。記録した人は 'auto'）をりさこが直す
+    await repository.auth.signIn('risako', 'pw')
+    const before = await repository.loadSnapshot()
+    const row = before.data.expenses.find((e) => e.tpl !== null && e.month === '2026-09')
+    expect(row).toBeDefined()
+    if (!row) return
+    const saved = await repository.updateExpense(row.id, { payer: 'b', amount: 12345 })
+    expect(saved.payer).toBe('b')
+    expect(saved.amount).toBe(12345)
+  })
+
+  it('毎月の支払いの行の日付・カテゴリ・メモは直せない（fixed_row_immutable）', async () => {
+    const repository = createLocalRepository('sep-open')
+    await repository.auth.signIn('risako', 'pw')
+    const before = await repository.loadSnapshot()
+    const row = before.data.expenses.find((e) => e.tpl !== null && e.month === '2026-09')
+    expect(row).toBeDefined()
+    if (!row) return
+    await expect(repository.updateExpense(row.id, { date: '2026-09-02' })).rejects.toMatchObject({
+      code: 'fixed_row_immutable',
+    })
+    await expect(repository.updateExpense(row.id, { cat: 'dining' })).rejects.toMatchObject({
+      code: 'fixed_row_immutable',
+    })
+    await expect(repository.updateExpense(row.id, { memo: 'メモ' })).rejects.toMatchObject({
+      code: 'fixed_row_immutable',
+    })
+  })
+
   it('記録の既定の払った人は本人の分だけ変わる（§12.1 Q3）', async () => {
     const { repository } = await signedIn('sep-open')
     await repository.updateDefaultPayer('joint')
     const after = await repository.loadSnapshot()
     expect(after.data.people.a.defaultPayer).toBe('joint')
     expect(after.data.people.b.defaultPayer).toBe('self')
+  })
+
+  it('給料の入り先は本人の分だけ変わる（S-33。2026-09-23 の決定）', async () => {
+    const { repository } = await signedIn('sep-open')
+    await repository.updateSalaryToJoint(true)
+    const after = await repository.loadSnapshot()
+    expect(after.data.people.a.salaryToJoint).toBe(true)
+    expect(after.data.people.b.salaryToJoint).toBe(false)
+  })
+
+  it('出す割合は本人の分だけ変わる（相手の行に渡しても動かない。2026-09-23 の決定）', async () => {
+    const { repository } = await signedIn('sep-open')
+    // 相手（りさこ）の行: 呼び名と色は変えられるが、出す割合は変わらない
+    await repository.updatePerson('b', { name: 'りさ', color: 'b', ratePct: 45 })
+    const after = await repository.loadSnapshot()
+    expect(after.data.people.b.name).toBe('りさ')
+    expect(after.data.people.b.ratePct).toBe(40)
+    // 自分（まさと）の行は変えられる
+    await repository.updateContributionRate(45)
+    const mine = await repository.loadSnapshot()
+    expect(mine.data.people.a.ratePct).toBe(45)
+  })
+
+  it('出す額を決めると、そのときの給料の入り先を月ごとに保存する', async () => {
+    const { repository } = await signedIn('sep-open')
+    await repository.updateSalaryToJoint(true)
+    const decided = await repository.decideContributions('2026-10', { a: 310000, b: 200000 })
+    expect(decided.result).toBe('ok')
+    const after = await repository.loadSnapshot()
+    expect(after.data.contributions['2026-10']?.a?.salaryToJoint).toBe(true)
+    expect(after.data.contributions['2026-10']?.b?.salaryToJoint).toBe(false)
+    // あとで設定を戻しても、決めた月の値は動かない
+    await repository.updateSalaryToJoint(false)
+    const later = await repository.loadSnapshot()
+    expect(later.data.contributions['2026-10']?.a?.salaryToJoint).toBe(true)
   })
 
   it('出す額を決めたのを元に戻せる（2回目は戻せない）', async () => {
@@ -136,6 +202,39 @@ describe('ローカル実装', () => {
     expect(second).toMatchObject({ result: 'blocked', reason: 'changed' })
     const after = await repository.loadSnapshot()
     expect(after.data.contributions['2026-10'] ?? {}).toEqual({})
+  })
+
+  it('決め直した月を元に戻すと、前の給料の入り先にも戻る（§12.1 Q27）', async () => {
+    const { repository } = await signedIn('sep-open')
+    // 2026-09 は §9.1 の見本データで決め済み（手取り 300,000・40%・自分の口座・出す額 120,000）
+    const start = await repository.loadSnapshot()
+    expect(start.data.contributions['2026-09']?.a).toMatchObject({
+      net: 300000,
+      ratePct: 40,
+      salaryToJoint: false,
+      amount: 120000,
+    })
+    const prev = start.data.contributions['2026-09']?.a
+
+    // 給料の入り先を共用にしてから決め直すと、入り先だけいまの設定を取り込む（割合は保存値のまま）
+    await repository.updateSalaryToJoint(true)
+    const decided = await repository.decideContributions('2026-09', { a: 310000 })
+    expect(decided.result).toBe('ok')
+    if (decided.result !== 'ok') return
+    const redecided = await repository.loadSnapshot()
+    expect(redecided.data.contributions['2026-09']?.a).toMatchObject({
+      net: 310000,
+      ratePct: 40,
+      salaryToJoint: true,
+      amount: 124000,
+    })
+
+    // 元に戻すと、給料の入り先も前の値（自分の口座）に戻る
+    const undone = await repository.undoDecideContributions('2026-09', decided.value.decidedAt)
+    expect(undone.result).toBe('ok')
+    const after = await repository.loadSnapshot()
+    expect(after.data.contributions['2026-09']?.a?.salaryToJoint).toBe(false)
+    expect(after.data.contributions['2026-09']?.a).toEqual(prev)
   })
 
   /* ［精算をやり直す］の元に戻す（02 §7・04 §8.2 settle_undo_reopen） -------- */
@@ -182,6 +281,36 @@ describe('ローカル実装', () => {
     const model = settleModel(after.data, '2026-09', after.now)
     expect(model.settle).toEqual({ a: 82490, b: 65930 })
     expect(s20State(after.data, model, null)).toBe('settled')
+  })
+
+  it('2回目のやり直しを元に戻しても、1回目に済んだ分は戻らない（R2-D04）', async () => {
+    const { repository } = await signedIn('sep-settled')
+    // 1回目: 確定 → 2人チェック済み（sep-settled）→ やり直す（済んだ分が done に移る）
+    const first = await repository.reopenMonth('2026-09')
+    expect(first.result).toBe('ok')
+    const moved = await repository.loadSnapshot()
+    const afterFirst = moved.data.settlements['2026-09']
+    expect(afterFirst?.done.a).toHaveLength(1)
+    expect(afterFirst?.done.b).toHaveLength(1)
+    // 中身は生きているオブジェクトなので、写しを取ってから先へ進む
+    const transferredAfterFirst = { ...afterFirst?.transferred }
+
+    // 2回目: この金額で精算（round が増える）→ 誰もチェックせずやり直す
+    const confirmed = await repository.confirmMonth('2026-09', null)
+    expect(confirmed.result).toBe('ok')
+    const second = await repository.reopenMonth('2026-09')
+    expect(second.result).toBe('ok')
+    if (second.result !== 'ok') return
+
+    // 元に戻す: 2回目には誰もチェックしていないので、1回目の済んだ分・チェックは動かない
+    const undone = await repository.undoReopen('2026-09', second.value.round)
+    expect(undone.result).toBe('ok')
+    const after = await repository.loadSnapshot()
+    const rec = after.data.settlements['2026-09']
+    expect(rec?.transferred).toEqual(transferredAfterFirst)
+    expect(rec?.done.a).toHaveLength(1)
+    expect(rec?.done.b).toHaveLength(1)
+    expect(rec?.checks).toEqual({})
   })
 
   /* 毎月の支払いの追加を元に戻す（04 §8.2 delete_template） ------------------ */
@@ -233,6 +362,62 @@ describe('ローカル実装', () => {
     const sumAfter = summarize(after.data.expenses, '2026-09')
     expect(sumAfter.unsent).toHaveLength(0)
     expect(sumAfter.total).toBe(180670 + 1280)
+  })
+
+  it('保留の行を端末から消せる（DB には何も送らない）', async () => {
+    const { repository } = await signedIn('sep-open')
+    const input = { id: 'p3', date: '2026-09-22', cat: 'dining' as const, amount: 900, payer: 'a' as const, memo: '' }
+    await repository.enqueueExpense(input)
+    expect(await repository.pendingExpenses()).toHaveLength(1)
+    await repository.dropPending('p3')
+    expect(await repository.pendingExpenses()).toEqual([])
+    // 送るものが残っていないので、つながっても DB は増えない
+    await repository.flushPending()
+    const after = await repository.loadSnapshot()
+    expect(summarize(after.data.expenses, '2026-09').total).toBe(180670)
+  })
+
+  it('保留の行の日付を変えて保存し直せる（同じ id で置き換わる）', async () => {
+    const { repository } = await signedIn('sep-open')
+    await repository.enqueueExpense({
+      id: 'p4',
+      date: '2026-09-22',
+      cat: 'dining',
+      amount: 900,
+      payer: 'a',
+      memo: 'ランチ',
+    })
+    await repository.updatePending('p4', {
+      id: 'p4',
+      date: '2026-09-20',
+      cat: 'dining',
+      amount: 1200,
+      payer: 'b',
+      memo: 'ランチ',
+    })
+    const rows = await repository.pendingExpenses()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id: 'p4', date: '2026-09-20', amount: 1200, payer: 'b', sync: 'pending' })
+  })
+
+  it('「送れませんでした」の行を直すと、もう一度送る対象に戻る', async () => {
+    const { repository } = await signedIn('sep-transfer')
+    // 9月は精算中なので送れない → 'failed'
+    await repository.enqueueExpense({ id: 'p5', date: '2026-09-15', cat: 'dining', amount: 1000, payer: 'a', memo: '' })
+    await repository.flushPending()
+    expect((await repository.pendingExpenses())[0]?.sync).toBe('failed')
+    // 精算中でない10月に移して保存し直すと送れる
+    await repository.updatePending('p5', {
+      id: 'p5',
+      date: '2026-10-02',
+      cat: 'dining',
+      amount: 1000,
+      payer: 'a',
+      memo: '',
+    })
+    expect((await repository.pendingExpenses())[0]?.sync).toBe('pending')
+    await repository.flushPending()
+    expect(await repository.pendingExpenses()).toEqual([])
   })
 
   it('その月が精算中になっていたら「送れませんでした」（§3.6 の4）', async () => {

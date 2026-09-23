@@ -77,6 +77,8 @@ export const SAMPLE_PEOPLE: Record<PersonKey, Person> = {
     name: 'まさと',
     color: 'a',
     ratePct: 40,
+    // §9 の見本データは2人とも「自分の口座」のまま（§6.2 の新しい式でも値は変わらない）
+    salaryToJoint: false,
     defaultPayer: 'self',
     lastSeen: '2026-09-17T22:00',
   },
@@ -85,6 +87,7 @@ export const SAMPLE_PEOPLE: Record<PersonKey, Person> = {
     name: 'りさこ',
     color: 'b',
     ratePct: 40,
+    salaryToJoint: false,
     defaultPayer: 'self',
     lastSeen: '2026-09-21T21:00',
   },
@@ -154,15 +157,15 @@ export const SAMPLE_TEMPLATES: FixedCostTemplate[] = [
   },
 ]
 
-/** §9.3 出す額（月ごと。手取り・割合・出す額を保存） */
+/** §9.3 出す額（月ごと。手取り・割合・給料の入り先・出す額を保存） */
 export const SAMPLE_CONTRIBUTIONS: Record<MonthKey, MonthContributions> = {
   '2026-08': {
-    a: { net: 295000, ratePct: 40, amount: 118000, by: 'a', at: '2026-08-01' },
-    b: { net: 230000, ratePct: 40, amount: 92000, by: 'b', at: '2026-08-02' },
+    a: { net: 295000, ratePct: 40, salaryToJoint: false, amount: 118000, by: 'a', at: '2026-08-01' },
+    b: { net: 230000, ratePct: 40, salaryToJoint: false, amount: 92000, by: 'b', at: '2026-08-02' },
   },
   '2026-09': {
-    a: { net: 300000, ratePct: 40, amount: 120000, by: 'a', at: '2026-09-01' },
-    b: { net: 220000, ratePct: 40, amount: 88000, by: 'b', at: '2026-09-03' },
+    a: { net: 300000, ratePct: 40, salaryToJoint: false, amount: 120000, by: 'a', at: '2026-09-01' },
+    b: { net: 220000, ratePct: 40, salaryToJoint: false, amount: 88000, by: 'b', at: '2026-09-03' },
   },
 }
 

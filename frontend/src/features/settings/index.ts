@@ -6,4 +6,3 @@
 export { AddToHomeSheet } from './add-to-home-sheet'
 export { SettingsTab } from './settings-tab'
 export { useAddToHome } from './use-add-to-home'
-export { useOnline } from './use-online'

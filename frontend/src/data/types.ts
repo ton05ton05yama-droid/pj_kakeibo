@@ -22,10 +22,12 @@ import type {
   Payer,
   Person,
   PersonAmounts,
+  PersonAmountsOrNull,
+  PersonFlags,
   PersonKey,
   SettlementCheck,
 } from '../domain'
-import { createMonthSettlement, nextSeq } from '../domain'
+import { computeJointSalary, createMonthSettlement, nextSeq } from '../domain'
 
 /** 「その月の1日」（DB の月） */
 export type DbMonth = string
@@ -88,6 +90,8 @@ export interface HouseholdMemberRow {
   display_name: string
   color: 'teal' | 'amber'
   contribution_rate: number
+  /** 給料の入り先（本人だけが変えられる。04 §2.2） */
+  salary_to_joint: boolean
   default_payer: 'self' | 'joint'
 }
 
@@ -135,6 +139,8 @@ export interface MonthContributionRow {
   user_id: string
   net_income: number
   contribution_rate: number
+  /** 決めた時点の給料の入り先（割合と同じスナップショット） */
+  salary_to_joint: boolean
   contribution: number
   decided_by: string
   decided_at: string
@@ -212,6 +218,7 @@ export function toPerson(row: HouseholdMemberRow, loginId: string, profile: Prof
     // DB は teal / amber、ドメインは a / b（§7.2 の割り当ては まさと teal・りさこ amber）
     color: row.color === 'amber' ? 'b' : 'a',
     ratePct: row.contribution_rate,
+    salaryToJoint: row.salary_to_joint ?? false,
     defaultPayer: row.default_payer,
     lastSeen: profile?.last_seen_at ? toDateTimeKey(profile.last_seen_at) : null,
   }
@@ -269,6 +276,7 @@ export function toContributions(
     cm[p] = {
       net: row.net_income,
       ratePct: row.contribution_rate,
+      salaryToJoint: row.salary_to_joint ?? false,
       amount: row.contribution,
       by: persons.keyOf[row.decided_by] ?? p,
       at: toDateTimeKey(row.decided_at),
@@ -341,10 +349,10 @@ export function toSettlements(
       const at = toDateTimeKey(c.checked_at)
       if (reopened) {
         // すべての回のチェックが済んだ分（private.month_live の transferred と同じ）
-        done[p].push({ amount: c.amount, at, by })
+        done[p].push({ amount: c.amount, at, by, round: c.round })
         transferred[p] += c.amount
       } else if (c.round < row.round) {
-        done[p].push({ amount: c.amount, at, by })
+        done[p].push({ amount: c.amount, at, by, round: c.round })
       } else {
         current[p] = { by, at, amount: c.amount }
       }
@@ -355,11 +363,23 @@ export function toSettlements(
 
     if (!reopened) {
       const cm = contributions[m] ?? {}
+      // 給料の入り先は、決めた月の month_contributions に保存した値（割合と同じ）。
+      // 共用に入った給料は そこから min(手取り, 出す額) で出す（DB の settle_confirm と同じ式。§6.2）
+      // ロック中は month_contributions の行が必ずある（確定の前提）。行が欠けたときは false で止める
+      // ＝ 人の設定には落とさない。SQL 側（0008 の month_live・month_summary）は coalesce で
+      // household_members に落ちるが、ロック中は同じ値になる（04 §6）。
+      const salaryToJoint: PersonFlags = {
+        a: cm.a?.salaryToJoint ?? false,
+        b: cm.b?.salaryToJoint ?? false,
+      }
+      const net: PersonAmountsOrNull = { a: cm.a?.net ?? null, b: cm.b?.net ?? null }
       rec.snapshot = {
         contrib,
-        net: { a: cm.a?.net ?? null, b: cm.b?.net ?? null },
+        net,
         ratePct: { a: cm.a?.ratePct ?? 0, b: cm.b?.ratePct ?? 0 },
+        salaryToJoint,
         adv,
+        jointSalary: computeJointSalary(net, contrib, salaryToJoint),
         joint: row.joint_paid,
         total: row.expense_total,
         settle,

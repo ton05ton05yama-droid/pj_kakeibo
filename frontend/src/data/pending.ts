@@ -31,12 +31,18 @@ export interface PendingExpense {
  * 置き場所（localStorage。読めない・書けないときは黙って諦める）
  * ------------------------------------------------------------------ */
 
+/** 金額の範囲（§7.5・D10。`domain` の assertAmount と同じ） */
+const MIN_AMOUNT = 1
+const MAX_AMOUNT = 9_999_999
+
 function isPendingExpense(value: unknown): value is PendingExpense {
   if (typeof value !== 'object' || value === null) return false
   const row = value as Partial<PendingExpense>
   const input = row.input as Partial<NewExpenseInput> | undefined
   if (input === undefined || typeof input.id !== 'string' || typeof input.date !== 'string') return false
   if (typeof input.amount !== 'number') return false
+  // 範囲外（0・1000万以上・NaN・小数）の行は読み捨てる。読んだ先の createExpense が投げて画面が真っ白になるのを防ぐ
+  if (!Number.isInteger(input.amount) || input.amount < MIN_AMOUNT || input.amount > MAX_AMOUNT) return false
   return row.sync === 'pending' || row.sync === 'failed'
 }
 
@@ -86,21 +92,33 @@ export function clearPending(): void {
  * 画面に出す形
  * ------------------------------------------------------------------ */
 
-/** 保留の行を記録の形にする（合計には入らない。§6.2） */
+/**
+ * 保留の行を記録の形にする（合計には入らない。§6.2）。
+ * 1行ずつ包んで、`createExpense` が投げた行（壊れた日付など）は端末から消して飛ばす。
+ * 1件の壊れた行で `loadSnapshot` が落ちると、全画面が出なくなるため。
+ */
 export function pendingExpenseRows(): Expense[] {
-  return readPending().map((row) =>
-    createExpense({
-      id: row.input.id,
-      date: row.input.date,
-      payer: row.input.payer,
-      cat: row.input.cat,
-      amount: row.input.amount,
-      memo: row.input.memo,
-      by: row.by,
-      at: row.at,
-      sync: row.sync,
-    })
-  )
+  const rows: Expense[] = []
+  for (const row of readPending()) {
+    try {
+      rows.push(
+        createExpense({
+          id: row.input.id,
+          date: row.input.date,
+          payer: row.input.payer,
+          cat: row.input.cat,
+          amount: row.input.amount,
+          memo: row.input.memo,
+          by: row.by,
+          at: row.at,
+          sync: row.sync,
+        })
+      )
+    } catch {
+      removePending(row.input.id)
+    }
+  }
+  return rows
 }
 
 /** 家計のデータに保留の行を混ぜる（loadSnapshot の最後で呼ぶ） */
@@ -154,7 +172,10 @@ export function requestPersistentStorage(): void {
  * 両方の実装が使う保留の口
  * ------------------------------------------------------------------ */
 
-export type PendingApi = Pick<Repository, 'enqueueExpense' | 'pendingExpenses' | 'flushPending'>
+export type PendingApi = Pick<
+  Repository,
+  'enqueueExpense' | 'pendingExpenses' | 'flushPending' | 'dropPending' | 'updatePending'
+>
 
 export interface PendingOptions {
   /** 記録した人と日時（保留の行に持たせる） */
@@ -177,6 +198,26 @@ export function createPendingApi(options: PendingOptions): PendingApi {
 
     async pendingExpenses(): Promise<Expense[]> {
       return pendingExpenseRows()
+    },
+
+    /** S-14 `unsent` の［削除］。DB には何も送らず端末から消すだけ */
+    async dropPending(id: string): Promise<void> {
+      removePending(id)
+      notifyPending()
+    },
+
+    /**
+     * S-14 `unsent` の［保存］。同じ id で置き換える（`addPending` が同じ id の行を入れ替える）。
+     * 「送れませんでした」の行を直したときは、もう一度送る対象（'pending'）に戻す。
+     */
+    async updatePending(id: string, input: NewExpenseInput): Promise<void> {
+      const before = readPending().find((x) => x.input.id === id)
+      const { by, at } = before ?? (await options.context())
+      // id を変えることは無いが、変わっても古い行が残らないように消してから足す
+      if (input.id !== id) removePending(id)
+      addPending({ input, by, at, sync: 'pending' })
+      requestPersistentStorage()
+      notifyPending()
     },
 
     async flushPending(): Promise<void> {

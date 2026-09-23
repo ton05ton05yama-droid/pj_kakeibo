@@ -16,8 +16,11 @@ import type { Expense, HouseholdData } from '@/domain'
 import { formatNumber, formatYenSuffix } from '@/lib/format'
 import { paysText, templateLabel } from './text'
 
-/** シートを閉じたときに返すもの（入力があれば「入力をやめました」を出す。§3.7） */
-export type FillAmountCloseResult = { dirty: boolean }
+/**
+ * シートを閉じたときに返すもの（入力があれば「入力をやめました」を出す。§3.7）。
+ * `digits` は入力中の金額（数字の並び。空文字は未入力）で、「元に戻す」で開き直すときに戻す。
+ */
+export type FillAmountCloseResult = { dirty: boolean; digits: string }
 
 export type FillAmountSheetProps = {
   open: boolean
@@ -32,6 +35,8 @@ export type FillAmountSheetProps = {
   progress: { index: number; total: number } | null
   /** その場の1行（§1.4）。親が「オンラインで直せます」「9月は精算中です…」を渡す */
   message: { text: string; tone: 'error' | 'info' } | null
+  /** 「入力をやめました」の元に戻すで開き直すときの入力中の金額（S-14 の `initialDraft` と同じ形） */
+  initialDigits?: string | null
   /** 金額を入れる（［入れる］／［次へ］） */
   onFill: (amount: number) => void
   /** 金額が 0 のまま押した（その場の1行「金額を入れてください」を出すのは親） */
@@ -56,6 +61,7 @@ export function FillAmountSheet({
   canDefer,
   progress,
   message,
+  initialDigits,
   onFill,
   onEmpty,
   onDefer,
@@ -73,6 +79,12 @@ export function FillAmountSheet({
     shownRow.current = expense.id
     reset(null)
   }, [expense.id, reset])
+
+  // 開き直したとき（「入力をやめました」の元に戻す）は、入力のまま戻す（S-14 と同じ形）
+  const restored = initialDigits ?? ''
+  useEffect(() => {
+    reset(restored === '' ? null : Number(restored))
+  }, [reset, restored])
 
   // 0 のまま押したときも金額を揺らす（§4 S-15 `empty`）
   const [emptyShake, setEmptyShake] = useState(false)
@@ -105,7 +117,7 @@ export function FillAmountSheet({
       open={open}
       tall
       label={`金額を入れる（${templateLabel(expense)}）`}
-      onClose={() => onClose({ dirty: !amount.isEmpty })}
+      onClose={() => onClose({ dirty: !amount.isEmpty, digits: amount.digits })}
       footer={<PrimaryButton onClick={submit}>{isLast ? '入れる' : '次へ'}</PrimaryButton>}
     >
       <Box data-screen='S-15' data-state={state}>

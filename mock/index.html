@@ -303,6 +303,8 @@ p, h1, h2, h3 { margin: 0; }
 /* 共用の行: 上は 8px（カードの下の間 8px をそのまま使う）。高さ 24px（1行の UI の行間 1.4 で文字 22px ＋ アバター 20px が収まる） */
 .jline { display: flex; align-items: center; gap: 8px; margin-top: 0; min-height: 24px; font-size: var(--fs-lg); line-height: var(--lh-ui); color: var(--text-main); }
 .jline b { font-weight: 600; }
+/* 共用の行の注記（うち 給料の残り n円）。家のアイコン 20 ＋ すきま 8 の分だけ字下げして、文の頭にそろえる */
+.jline-sub { margin: 2px 0 0 28px; }
 /* 状態の1行と数字の無い式を1つの行に（状態 --text-sub ＋ 全角の空白 ＋ 式 --text-muted。入りきらなければ式が次の行へ） */
 .stline { display: flex; flex-wrap: wrap; align-items: center; font-size: var(--fs-body-sm); color: var(--text-sub); font-weight: 500; line-height: var(--lh-ui); min-height: 28px; padding: 4px 0; }
 .stline .ic { width: 14px; height: 14px; }
@@ -346,6 +348,10 @@ p, h1, h2, h3 { margin: 0; }
 .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: var(--fs-lg); padding: 2px 0; }
 .kv .num { font-weight: 600; }
 .kv.sub { font-size: var(--fs-body-sm); color: var(--text-muted); padding-left: 12px; }
+/* S-33 相手の行の読み取り専用（出す割合・給料の入り先は本人だけが変えられる。§2.2）。
+   押せないボタンは作らない（P7）ので、セグメントや欄ではなく値の表示にする */
+.rov { min-height: 44px; display: flex; align-items: center; font-size: var(--fs-lg); font-weight: 600; color: var(--text-main); line-height: var(--lh-ui); }
+.ro-note { font-size: var(--fs-body-sm); color: var(--text-sub); font-weight: 500; line-height: var(--lh-ui); margin-top: 8px; }
 .colors { display: flex; gap: 16px; }
 .colorbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; border: 2px solid transparent; }
 .colorbtn.on { border-color: var(--text-main); }
@@ -368,7 +374,9 @@ p, h1, h2, h3 { margin: 0; }
 .s21row + .s21row { margin-top: 8px; }
 .s21h { display: flex; align-items: center; gap: 8px; height: 28px; }
 .s21h .scard-name { flex: none; }
-.s21h .note { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「決めた: …」は右端に寄せ、狭いときは省く。「給料は共用に入る」は名前のすぐ右に置き、省かない（並びは 名前 → 給料は共用に入る → 決めた） */
+.s21h .note-decided { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s21h .note-sj { margin-left: 8px; flex: none; text-overflow: clip; white-space: nowrap; }
 .s21f { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--fs-md); color: var(--text-sub); flex-wrap: nowrap; }
 .netfield { flex: 1; min-width: 0; height: var(--control-h); border-radius: var(--radius-control); border: 1px solid var(--border-strong); background: var(--bg-input); font-size: var(--fs-lg); font-weight: 500; text-align: right; padding: 0 10px; font-variant-numeric: tabular-nums; color: var(--text-main); }
 .netfield.on { outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: transparent; }
@@ -525,9 +533,12 @@ const DATA = {
   /* §9.1 人 */
   people: {
     /* defaultPayer: 記録（S-12）を開いたときの払った人の既定。'self' = ログイン中の人 ／ 'joint' = 共用。
-       本人だけが設定（S-30）で変えられる（§2.2）。見本データは2人とも 'self'（§9.1） */
-    a: { id: 'masato',  name: 'まさと',     color: 'a', ratePct: 40, defaultPayer: 'self', lastSeen: '2026-09-17T22:00' },
-    b: { id: 'risako', name: 'りさこ', color: 'b', ratePct: 40, defaultPayer: 'self', lastSeen: '2026-09-21T21:00' },
+       本人だけが設定（S-30）で変えられる（§2.2）。見本データは2人とも 'self'（§9.1）。
+       salaryToJoint: 給料の入り先（S-33）。true = 共用口座に入る ／ false = 自分の口座。本人だけが変えられる（§2.2）。
+       見本データは2人とも false（自分の口座。§9.1）。出す額を決めた月にはその時点の値を保存する（contributions）。
+       出す割合と違い、決め直すとそのときの設定で上書きされる（§6.2） */
+    a: { id: 'masato',  name: 'まさと',     color: 'a', ratePct: 40, defaultPayer: 'self', salaryToJoint: false, lastSeen: '2026-09-17T22:00' },
+    b: { id: 'risako', name: 'りさこ', color: 'b', ratePct: 40, defaultPayer: 'self', salaryToJoint: false, lastSeen: '2026-09-21T21:00' },
   },
   /* §9.2 毎月の支払い（ひな形）。すべて 2026-08-01 にまさとが作った */
   templates: [
@@ -537,12 +548,12 @@ const DATA = {
     { id: 't4', name: '電気代',   cat: 'utilities', payer: 'joint', kind: 'variable', amount: null,  from: '2026-08', until: null, createdBy: 'a' },
     { id: 't5', name: 'ガス代',   cat: 'utilities', payer: 'a',     kind: 'variable', amount: null,  from: '2026-08', until: null, createdBy: 'a' },
   ],
-  /* §9.3 出す額（月ごと。手取り・割合・出す額を保存） */
+  /* §9.3 出す額（月ごと。手取り・割合・出す額・給料の入り先を、決めた時点の値で保存する） */
   contributions: {
-    '2026-08': { a: { net: 295000, ratePct: 40, amount: 118000, by: 'a', at: '2026-08-01' },
-                 b: { net: 230000, ratePct: 40, amount: 92000,  by: 'b', at: '2026-08-02' } },
-    '2026-09': { a: { net: 300000, ratePct: 40, amount: 120000, by: 'a', at: '2026-09-01' },
-                 b: { net: 220000, ratePct: 40, amount: 88000,  by: 'b', at: '2026-09-03' } },
+    '2026-08': { a: { net: 295000, ratePct: 40, amount: 118000, salaryToJoint: false, by: 'a', at: '2026-08-01' },
+                 b: { net: 230000, ratePct: 40, amount: 92000,  salaryToJoint: false, by: 'b', at: '2026-08-02' } },
+    '2026-09': { a: { net: 300000, ratePct: 40, amount: 120000, salaryToJoint: false, by: 'a', at: '2026-09-01' },
+                 b: { net: 220000, ratePct: 40, amount: 88000,  salaryToJoint: false, by: 'b', at: '2026-09-03' } },
   },
   /* §9.4 2026年8月（精算済み）。電気代（8月分）は来月に回したので 9月の s04 */
   aug: [
@@ -631,6 +642,14 @@ const CALC = (() => {
   const contributionOf = (net, ratePct) => Math.floor(net * ratePct / 100);
   /* その月に使う出す割合: その月に保存した割合があればそれ（決め直しても変えない）、無ければ人の割合（S-21・§6.2） */
   const rateFor = (d, m, p) => { const c = (d.contributions[m] || {})[p]; return c ? c.ratePct : d.people[p].ratePct; };
+  /* その月に使う給料の入り先: その月に保存した値があればそれ、無ければ人の設定（S-33・§6.2）。
+     保存した値は決め直すと人の今の設定で上書きされる（MODEL.decideContributions） */
+  const salaryToJointFor = (d, m, p) => { const c = (d.contributions[m] || {})[p]; return c ? !!c.salaryToJoint : !!d.people[p].salaryToJoint; };
+  /* 共用に入った給料_i ＝ その月の給料の入り先が共用なら min(手取り_i, 出す額_i)、そうでなければ 0（§6.2）。
+     手取りか出す額が未入力の月は 0（出す額も決まっていない。§6.3 ケースN） */
+  const jointSalaryOf = (net, contribution, toJoint) => (toJoint && net != null && contribution != null ? Math.min(net, contribution) : 0);
+  /* 共用に入る人の手取り（入らない人は 0）。共用の通帳の動きに使う（V11） */
+  const salaryInOf = (net, toJoint) => (toJoint && net != null ? net : 0);
   /* 金額待ち = 毎月の支払いの行で金額が無く、今月はなしでもない */
   const isPending = (e) => !!e.tpl && e.amount == null && !e.skipped;
   /* 対象 = 金額が入っていて、今月はなしでなく、未送信でない（§6.2・V7） */
@@ -661,11 +680,16 @@ const CALC = (() => {
     return { m, rows, adv, advRows, joint, total, count, byCat, pending, fixedRows, fixedCount: fixedCounted.length, fixedSum, deferredOut, manual, unsent };
   }
 
-  /* 精算額_i = 出す額_i − 立替_i、共用の収支 = Σ出す額 − 支出合計 */
-  function computeSettle(contrib, adv, total) {
-    const settle = { a: contrib.a - adv.a, b: contrib.b - adv.b };
+  /* 精算額_i ＝ 出す額_i − 立替_i − 共用に入った給料_i（§6.2）
+     共用の過不足（jointNet）＝ Σ出す額 − 支出合計（今までどおり。給料は入れない）
+     給料の残り（salaryLeft）＝ Σ(手取り_i − 共用に入った給料_i)（共用に入る人だけ。出す額を超えて共用に残る分）
+     共用の通帳の動き（jointBook）＝ 共用の過不足 ＋ 給料の残り
+       ＝ Σ手取り(共用に入る人) ＋ Σ正の精算額 − 共用払い − Σ|負の精算額|（V11） */
+  function computeSettle(contrib, adv, total, js = { a: 0, b: 0 }, salaryIn = { a: 0, b: 0 }) {
+    const settle = { a: contrib.a - adv.a - js.a, b: contrib.b - adv.b - js.b };
     const jointNet = contrib.a + contrib.b - total;
-    return { settle, jointNet };
+    const salaryLeft = (salaryIn.a - js.a) + (salaryIn.b - js.b);
+    return { settle, jointNet, salaryLeft, jointBook: jointNet + salaryLeft };
   }
   /* 残り_i = 精算額_i − 済んだ分_i（済んだ分は 入れた＋、受け取った−） */
   const remainingOf = (settle, transferred) => ({ a: settle.a - transferred.a, b: settle.b - transferred.b });
@@ -690,12 +714,18 @@ const CALC = (() => {
     const adv = snap ? snap.adv : sum.adv;
     const joint = snap ? snap.joint : sum.joint;
     const total = snap ? snap.total : sum.total;
+    /* 給料の入り先も、精算中・精算済みは［この金額で精算］時点の保存値を使う（あとで設定を変えても動かない。§6.3 ケースN） */
+    const salaryToJoint = snap && snap.salaryToJoint ? { ...snap.salaryToJoint } : { a: salaryToJointFor(d, m, 'a'), b: salaryToJointFor(d, m, 'b') };
+    const jointSalary = { a: jointSalaryOf(net.a, contrib.a, salaryToJoint.a), b: jointSalaryOf(net.b, contrib.b, salaryToJoint.b) };
+    const salaryIn = { a: salaryInOf(net.a, salaryToJoint.a), b: salaryInOf(net.b, salaryToJoint.b) };
     const decided = contrib.a != null && contrib.b != null;
-    const r = decided ? computeSettle(contrib, adv, total) : { settle: null, jointNet: null };
+    const r = decided ? computeSettle(contrib, adv, total, jointSalary, salaryIn) : { settle: null, jointNet: null, salaryLeft: 0, jointBook: null };
     const transferred = rec && rec.transferred ? { ...rec.transferred } : { a: 0, b: 0 };
     const remaining = r.settle ? remainingOf(r.settle, transferred) : null;
     return {
       m, status, rec, sum, contrib, net, ratePct, adv, joint, total, decided,
+      salaryToJoint, jointSalary, salaryIn, anySalary: salaryToJoint.a || salaryToJoint.b,
+      salaryLeft: r.salaryLeft, jointBook: r.jointBook,
       settle: r.settle, jointNet: r.jointNet, transferred, remaining,
       checks: rec && rec.checks ? rec.checks : {}, done: rec && rec.done ? rec.done : { a: [], b: [] },
       pending: sum.pending, hasTransferred: transferred.a !== 0 || transferred.b !== 0,
@@ -764,7 +794,7 @@ const CALC = (() => {
     return best;
   }
 
-  return { monthOf, addMonth, contributionOf, rateFor, isPending, isCounted, isLockedStatus, summarize, computeSettle, remainingOf, monthStatus, settleModel, s20State, monthsUntil, attention, defaultSettleMonth, guessCategory };
+  return { monthOf, addMonth, contributionOf, rateFor, salaryToJointFor, jointSalaryOf, salaryInOf, isPending, isCounted, isLockedStatus, summarize, computeSettle, remainingOf, monthStatus, settleModel, s20State, monthsUntil, attention, defaultSettleMonth, guessCategory };
 })();
 
 /* ---------------------------------------------------------------------
@@ -795,20 +825,24 @@ const MODEL = (() => {
     const md = CALC.settleModel(d, m, at);
     const rec = d.settlements[m] || (d.settlements[m] = { transferred: { a: 0, b: 0 }, done: { a: [], b: [] }, checks: {} });
     rec.status = 'confirmed'; rec.confirmedBy = by; rec.confirmedAt = at; rec.checks = {};
-    rec.snapshot = { contrib: { ...md.contrib }, net: { ...md.net }, ratePct: { ...md.ratePct }, adv: { ...md.adv }, joint: md.joint, total: md.total, settle: { ...md.settle }, jointNet: md.jointNet };
+    rec.snapshot = { contrib: { ...md.contrib }, net: { ...md.net }, ratePct: { ...md.ratePct }, salaryToJoint: { ...md.salaryToJoint }, adv: { ...md.adv }, joint: md.joint, total: md.total,
+      settle: { ...md.settle }, jointSalary: { ...md.jointSalary }, jointNet: md.jointNet, salaryLeft: md.salaryLeft, jointBook: md.jointBook };
     const rem = CALC.remainingOf(md.settle, rec.transferred);
     if (rem.a === 0 && rem.b === 0) { rec.status = 'settled'; rec.settledAt = at; }
     return rec.status;
   }
   /* 出す額の行を作る（S-21［決める］・S-20［この額で決める］。04 §8.3 の RPC decide_contributions と同じ形）。
+     決め直したときは、割合はその月に保存した値のまま・給料の入り先は人の今の設定を取り込む（§6.2）。
      nets = { a?: 手取り, b?: 手取り }。渡された人の行だけを { net, ratePct, amount, by, at } で作って返す（d は変えない。
      保存は呼ぶ側で d.contributions[m] に入れる。表示〈S-21 の出す額・S-20 の出す額のブロック〉も同じ関数で出す） */
   function decideContributions(d, m, nets, by, at) {
     const out = {};
     for (const p of ['a', 'b']) {
       if (nets[p] == null) continue;
+      /* 出す割合は「これからこうする」取り決めなので、決め直してもその月に保存した割合のまま（CALC.rateFor。§6.2） */
       const ratePct = CALC.rateFor(d, m, p);
-      out[p] = { net: nets[p], ratePct, amount: CALC.contributionOf(nets[p], ratePct), by, at };
+      /* 給料の入り先は「その月の給料が実際にどこへ入ったか」という事実なので、決め直すと人の今の設定（S-33）を取り込む（§6.2） */
+      out[p] = { net: nets[p], ratePct, amount: CALC.contributionOf(nets[p], ratePct), salaryToJoint: !!d.people[p].salaryToJoint, by, at };
     }
     return out;
   }
@@ -882,7 +916,7 @@ function buildScenario(sc) {
   return { data: d, now: (SCENARIOS.find((s) => s.id === sc) || SCENARIOS[0]).now };
 }
 
-/* §6.3 精算ケース（B・C・D・E・L・I-2・I-3 は合成の数字。A・D'・F・G・I-1 は見本データ。H は見本データを1か所変えた合成） */
+/* §6.3 精算ケース（B・C・C0・D・E・L・I-2・I-3 は合成の数字。A・D'・F・G・I-1 は見本データ。H・N は見本データに重ねた合成） */
 const CASES = [
   { id: 'A',  label: 'A: 2人とも共用へ入れる（見本 9月 確定値）', real: { sc: 'sep-ready', tab: 'S-20', m: '2026-09' } },
   { id: 'B',  label: 'B: 片方が共用から受け取る（合成）', net: { a: 300000, b: 220000 }, adv: { a: 30000, b: 100000 }, joint: 50000 },
@@ -893,17 +927,22 @@ const CASES = [
   { id: 'E',  label: 'E: 2人とも受け取る（合成）',        net: { a: 300000, b: 220000 }, adv: { a: 130000, b: 95000 }, joint: 15000 },
   { id: 'F',  label: 'F: 金額待ちのまま月が終わった（見本 10/1）', real: { sc: 'sep-prep', tab: 'S-20', m: '2026-09' } },
   { id: 'G',  label: 'G: 来月に回す（見本 10月の支出）',   real: { sc: 'sep-ready', tab: 'S-10', m: '2026-10' } },
-  { id: 'H',  label: 'H: 出す額が決まらないまま月が終わった（10/1 の9月）', real: { sc: 'sep-prep', tab: 'S-20', m: '2026-09', mod: (d) => { delete d.contributions['2026-09']; } } },
+  { id: 'H',  label: 'H: 出す額が決まらないまま月が終わった（見本 10/1 の9月から出す額を消した合成）', real: { sc: 'sep-prep', tab: 'S-20', m: '2026-09', mod: (d) => { delete d.contributions['2026-09']; } } },
   { id: 'I',  label: 'I-1: やり直し・向きが逆（見本 10/3）', real: { sc: 'sep-redo', tab: 'S-20', m: '2026-09' } },
   { id: 'I2', label: 'I-2: やり直し・同じ向き（合成）',    net: { a: 300000, b: 220000 }, adv: { a: 36230, b: 22070 }, joint: 146550, transferred: { a: 82490, b: 65930 } },
   { id: 'I3', label: 'I-3: 入れたのに受け取る側に（合成）', net: { a: 300000, b: 220000 }, adv: { a: 121000, b: 22070 }, joint: 146550, transferred: { a: 2000, b: 65930 } },
   { id: 'L',  label: 'L: 手取り×割合の端数（合成）',       net: { a: 283457, b: 220000 }, adv: { a: 37510, b: 22070 }, joint: 146550 },
+  /* N: 見本データの9月確定値に「りさこの給料は共用に入る」を重ねたもの（§9 の見本データの既定は変えないので、ここで重ねる）。
+     まさと 120,000 − 37,510 − 0 ＝ 82,490 を共用へ入れる ／ りさこ 88,000 − 22,070 − 88,000 ＝ −22,070（共用から受け取る）
+     共用 220,000 ＋ 82,490 − 146,550 − 22,070 ＝ 133,870 残る（過不足 1,870 ＋ 給料の残り 132,000） */
+  { id: 'N',  label: 'N: りさこの給料が共用に入る（見本 9月確定値に重ねた合成）',
+    real: { sc: 'sep-ready', tab: 'S-20', m: '2026-09', mod: (d) => { d.people.b.salaryToJoint = true; d.contributions['2026-09'].b.salaryToJoint = true; } } },
 ];
 /* 合成ケースのデータ: 9月を「締め待ち・金額待ちなし」にして、人ごとの立替を1行ずつにまとめる */
 function buildCaseData(c) {
   const base = buildScenario('sep-open').data;
   const d = { household: base.household, people: base.people, templates: base.templates, settlements: { '2026-08': base.settlements['2026-08'] }, contributions: { '2026-08': base.contributions['2026-08'] } };
-  const mk = (p) => ({ net: c.net[p], ratePct: 40, amount: CALC.contributionOf(c.net[p], 40), by: p, at: '2026-09-01' });
+  const mk = (p) => ({ net: c.net[p], ratePct: 40, amount: CALC.contributionOf(c.net[p], 40), salaryToJoint: !!(c.salaryToJoint || {})[p], by: p, at: '2026-09-01' });
   d.contributions['2026-09'] = { a: mk('a'), b: mk('b') };
   d.expenses = base.expenses.filter((e) => e.month === '2026-08');
   const memo = 'ケース' + c.id.replace('I2', 'I-2').replace('I3', 'I-3') + '（合成）';
@@ -929,7 +968,9 @@ const EXPECT = {
               byCat: [['housing', 92980], ['groceries', 39230], ['dining', 24450], ['utilities', 16040], ['leisure', 10400], ['household_goods', 8980], ['telecom', 5500], ['social', 4320], ['transport', 2640], ['entertainment', 1590]] },
   sepRedo:  { adv: { a: 40810, b: 22070 }, joint: 146550, total: 209430, settle: { a: 79190, b: 65930 }, jointNet: -1430, remaining: { a: -3300, b: 0 }, advCount: { a: 9, b: 6 } },
   syn7:     { total: 95670, count: 19, fixedSum: 16930 },   /* V7 の合成データ（sep-open ＋ 家賃を今月はなし ＋ 未送信 999円） */
-  cases:    { B: { settle: { a: 90000, b: -12000 }, jointNet: 28000 }, C: { settle: { a: 90000, b: 0 }, jointNet: 28000 }, D: { settle: { a: 90000, b: 65000 }, jointNet: -22000 }, E: { settle: { a: -10000, b: -7000 }, jointNet: -32000 }, L: { contribA: 113382 } },
+  cases:    { B: { settle: { a: 90000, b: -12000 }, jointNet: 28000 }, C: { settle: { a: 90000, b: 0 }, jointNet: 28000 }, C0: { settle: { a: 0, b: 0 }, jointNet: -10000 }, D: { settle: { a: 90000, b: 65000 }, jointNet: -22000 }, E: { settle: { a: -10000, b: -7000 }, jointNet: -32000 }, L: { contribA: 113382 } },
+  /* §6.3 ケースN（見本データ 9月確定値 ＋ りさこの給料は共用）。V11 で使う */
+  caseN:    { jointSalary: { a: 0, b: 88000 }, settle: { a: 82490, b: -22070 }, jointNet: 1870, salaryLeft: 132000, jointBook: 133870 },
   /* §9.8 のシナリオごとの期待値（新着・お知らせ行） */
   scen: {
     'sep-open':          { s20: 'estimate', s20now: 'prep', newA: 3, newB: 2, attA: null, attB: null, oct: null },
@@ -961,15 +1002,15 @@ function runVerification() {
   add('V2', '出す額 ＝ floor(手取り × 割合 ÷ 100)', ok, v2.map(([n, c]) => `${f(n)} × 40 ÷ 100 ＝ ${f(CALC.contributionOf(n, 40))}`).join('、'));
   /* V3 */
   ok = sets.every(([, md, ex]) => eq(md.settle, ex.settle) && md.settle.a === md.contrib.a - md.adv.a && md.settle.b === md.contrib.b - md.adv.b);
-  add('V3', '精算額 ＝ 出す額 − 立替', ok, sets.map(([n, md]) => `${n} ${f(md.settle.a)}・${f(md.settle.b)}`).join(' ／ '));
+  add('V3', '精算額 ＝ 出す額 − 立替 − 共用に入った給料（見本データは 共用に入った給料 ＝ 0）', ok, sets.map(([n, md]) => `${n} ${f(md.settle.a)}・${f(md.settle.b)}`).join(' ／ '));
   /* V4 */
   ok = sets.every(([, md, ex]) => md.jointNet === ex.jointNet && md.jointNet === md.settle.a + md.settle.b - md.joint);
-  add('V4', '共用の収支 ＝ Σ出す額 − 支出合計 ＝ Σ精算額 − 共用払い', ok, sets.map(([n, md]) => `${n} ${md.jointNet < 0 ? '−' : ''}${f(Math.abs(md.jointNet))}`).join(' ／ '));
+  add('V4', 'joint_net ＝ Σ出す額 − 支出合計 ＝ Σ精算額 ＋ Σ共用に入った給料 − 共用払い', ok, sets.map(([n, md]) => `${n} ${md.jointNet < 0 ? '−' : ''}${f(Math.abs(md.jointNet))}`).join(' ／ '));
   /* V5 */
   const ce = CASES.find((c) => c.id === 'E');
   const e5 = CALC.computeSettle({ a: CALC.contributionOf(ce.net.a, 40), b: CALC.contributionOf(ce.net.b, 40) }, ce.adv, ce.adv.a + ce.adv.b + ce.joint);
   ok = e5.settle.a < 0 && e5.settle.b < 0 && e5.jointNet < 0 && eq(e5.settle, EXPECT.cases.E.settle) && e5.jointNet === EXPECT.cases.E.jointNet;
-  add('V5', '2人とも精算額 < 0 なら 共用の収支 < 0', ok, `ケースE: ${e5.settle.a}、${e5.settle.b} → ${e5.jointNet}`);
+  add('V5', '共用に入った給料がすべて 0 の月で 2人とも精算額 < 0 なら 共用の過不足（joint_net）< 0', ok, `ケースE: ${e5.settle.a}、${e5.settle.b} → ${e5.jointNet}`);
   /* V6 */
   ok = eq(m9r.remaining, EXPECT.sepRedo.remaining) && eq(m9r.transferred, { a: 82490, b: 65930 });
   add('V6', '残り ＝ 精算額（新） − 済んだ分', ok, `まさと ${f(m9r.settle.a)} − ${f(m9r.transferred.a)} ＝ ${m9r.remaining.a}、りさこ ${m9r.remaining.b}`);
@@ -990,10 +1031,50 @@ function runVerification() {
   /* V9 */
   ok = m9o.sum.fixedSum === EXPECT.sepOpen.fixedSum && m9o.sum.fixedCount === 4 && m8.sum.fixedSum === EXPECT.aug.fixedSum && m8.sum.fixedCount === 4 && m9f.sum.fixedSum === EXPECT.sepFinal.fixedSum && m9f.sum.fixedCount === 5;
   add('V9', '毎月の支払いのまとまり ＝ 金額ありの行の和', ok, `9月見込み ${m9o.sum.fixedCount}件 ${f(m9o.sum.fixedSum)} ／ 8月 ${f(m8.sum.fixedSum)} ／ 9月確定 ${m9f.sum.fixedCount}件 ${f(m9f.sum.fixedSum)}`);
-  /* V10 */
-  const res = ['B', 'C', 'D'].map((id) => { const c = CASES.find((x) => x.id === id); const r = CALC.computeSettle({ a: CALC.contributionOf(c.net.a, 40), b: CALC.contributionOf(c.net.b, 40) }, c.adv, c.adv.a + c.adv.b + c.joint); return [id, r]; });
-  ok = res.every(([id, r]) => eq(r.settle, EXPECT.cases[id].settle) && r.jointNet === EXPECT.cases[id].jointNet) && CALC.contributionOf(283457, 40) === EXPECT.cases.L.contribA;
-  add('V10', '§6.3 の合成ケース B・C・D・L', ok, res.map(([id, r]) => `${id}: ${r.settle.a}・${r.settle.b} → ${r.jointNet}`).join(' ／ ') + ` ／ L: floor(283,457 × 40 ÷ 100) ＝ ${f(CALC.contributionOf(283457, 40))}`);
+  /* V10: EXPECT.cases の合成ケースのうち精算額を持つもの（B・C・C0・D・E）をすべて突き合わせる。ケースを足したらここも自動で増える */
+  const v10ids = Object.keys(EXPECT.cases).filter((id) => EXPECT.cases[id].settle);
+  const res = v10ids.map((id) => { const c = CASES.find((x) => x.id === id); const r = c && CALC.computeSettle({ a: CALC.contributionOf(c.net.a, 40), b: CALC.contributionOf(c.net.b, 40) }, c.adv, c.adv.a + c.adv.b + c.joint); return [id, r]; });
+  ok = res.every(([id, r]) => r && eq(r.settle, EXPECT.cases[id].settle) && r.jointNet === EXPECT.cases[id].jointNet) && CALC.contributionOf(283457, 40) === EXPECT.cases.L.contribA;
+  add('V10', `§6.3 の合成ケース ${v10ids.join('・')}・L`, ok, res.map(([id, r]) => `${id}: ${r ? `${r.settle.a}・${r.settle.b} → ${r.jointNet}` : '見つからない'}`).join(' ／ ') + ` ／ L: floor(283,457 × 40 ÷ 100) ＝ ${f(CALC.contributionOf(283457, 40))}`);
+  /* V11（§6.2・§6.3 ケースN）: 共用の通帳の動き ＝ Σ手取り(共用に入る人) ＋ Σ正の精算額 − 共用払い − Σ|負の精算額|
+     ＝ （Σ出す額 − 支出合計）＋ Σ(手取り − 共用に入った給料)。§9 の見本データ（2人とも自分の口座）でも両辺とも V4 と同じ値になる */
+  {
+    const P = ['a', 'b'];
+    /* 通帳の動きを、式のとおりに1つずつ足して出す（CALC とは別の道すじで出して突き合わせる） */
+    const book = (md) => P.reduce((t, p) => t + md.salaryIn[p], 0) + P.reduce((t, p) => t + Math.max(md.settle[p], 0), 0)
+      - md.joint - P.reduce((t, p) => t + Math.max(-md.settle[p], 0), 0);
+    const cn = CASES.find((c) => c.id === 'N');
+    const nb = buildScenario(cn.real.sc); cn.real.mod(nb.data);
+    const mn = CALC.settleModel(nb.data, cn.real.m, nb.now);
+    const ex = EXPECT.caseN;
+    let bad11 = [];
+    if (!eq(mn.jointSalary, ex.jointSalary)) bad11.push('ケースN 共用に入った給料');
+    if (!eq(mn.settle, ex.settle)) bad11.push('ケースN 精算額');
+    if (mn.jointNet !== ex.jointNet || mn.salaryLeft !== ex.salaryLeft || mn.jointBook !== ex.jointBook) bad11.push('ケースN 共用');
+    if (book(mn) !== ex.jointBook) bad11.push('ケースN 通帳の動き');
+    /* 見本データのまま（2人とも自分の口座）は、通帳の動き ＝ 共用の過不足（V4 と同じ値） */
+    for (const [n, md] of sets.map(([n, md]) => [n, md])) if (md.settle && (md.jointBook !== md.jointNet || book(md) !== md.jointNet)) bad11.push(n + ' 見本データ');
+    /* 手取り < 出す額（出す額まで届かない）: 共用に入った給料 ＝ 手取り。残り 30,000 は追加で共用へ入れる */
+    const e1 = CALC.computeSettle({ a: 80000, b: 88000 }, { a: 0, b: 22070 }, 168070,
+      { a: CALC.jointSalaryOf(50000, 80000, true), b: 0 }, { a: CALC.salaryInOf(50000, true), b: 0 });
+    if (CALC.jointSalaryOf(50000, 80000, true) !== 50000 || e1.settle.a !== 30000 || e1.salaryLeft !== 0) bad11.push('手取り < 出す額');
+    /* 2人とも共用に入る: どちらも立替の実費だけ受け取る（精算額 ＝ −立替） */
+    const js2 = { a: CALC.jointSalaryOf(300000, 120000, true), b: CALC.jointSalaryOf(220000, 88000, true) };
+    const e2 = CALC.computeSettle({ a: 120000, b: 88000 }, { a: 37510, b: 22070 }, 206130, js2, { a: 300000, b: 220000 });
+    if (e2.settle.a !== -37510 || e2.settle.b !== -22070 || e2.jointBook !== 1870 + (300000 - 120000) + (220000 - 88000)) bad11.push('2人とも共用');
+    /* 手取りが未入力の月: 共用に入った給料 0（出す額も決まっていない） */
+    if (CALC.jointSalaryOf(null, null, true) !== 0) bad11.push('手取り未入力');
+    /* 精算中の月は、決めたときに保存した値で表示する（あとで S-33 を変えても動かない） */
+    const lb = buildScenario('sep-ready'); cn.real.mod(lb.data);
+    MODEL.confirmMonth(lb.data, '2026-09', 'a', '2026-10-01T21:00');
+    lb.data.people.b.salaryToJoint = false; lb.data.contributions['2026-09'].b.salaryToJoint = false;
+    const ml = CALC.settleModel(lb.data, '2026-09', '2026-10-01T21:05');
+    if (ml.jointSalary.b !== 88000 || ml.settle.b !== -22070 || ml.jointBook !== 133870) bad11.push('精算中はスナップショット');
+    add('V11', '共用の通帳の動き ＝ Σ手取り(共用に入る人) ＋ Σ正の精算額 − 共用払い − Σ|負の精算額| ＝ 共用の過不足 ＋ 給料の残り', bad11.length === 0,
+      bad11.length ? bad11.join('、') : `ケースN: 220,000 ＋ ${f(mn.settle.a)} − ${f(mn.joint)} − ${f(-mn.settle.b)} ＝ ${f(mn.jointBook)}（過不足 ${f(mn.jointNet)} ＋ 給料の残り ${f(mn.salaryLeft)}）`
+        + ` ／ 見本データ（2人とも自分の口座）は V4 と同じ ${sets.map(([n, md]) => `${n} ${md.jointBook < 0 ? '−' : ''}${f(Math.abs(md.jointBook))}`).join('・')}`
+        + ` ／ 手取り < 出す額・2人とも共用・手取り未入力・精算中はスナップショット`);
+  }
   /* 補足: もう払った分の件数（§9.6 S-22 の表）と §9.8 のシナリオ期待値 */
   ok = sets.filter(([, , ex]) => ex.advCount).every(([, md, ex]) => md.sum.advRows.a.length === ex.advCount.a && md.sum.advRows.b.length === ex.advCount.b);
   add('S-22', 'もう払った分の件数（8月 6・6 ／ 見込み 6・5 ／ 確定 8・6 ／ やり直し 9・6）', ok, sets.map(([n, md]) => `${n} ${md.sum.advRows.a.length}・${md.sum.advRows.b.length}`).join(' ／ '));
@@ -1582,13 +1663,16 @@ function settleCard(p, mo, st, msg) {
     <button type="button" class="scard-hit" data-act="openS22" data-arg="${p}" aria-label="${esc(whoName(p))}の内訳"></button>
     <div class="scard-h">${avatar(p, 28)}<span class="scard-name">${esc(whoName(p))}${selfMark(p)}</span>${tag}${ic('chevron-right', 16, 'scard-go')}</div>${body}${msg || ''}</div>`;
 }
-/* S-20 共用の行（カードにしない。灰色の家のアイコンと文。警告の色にしない） */
+/* S-20 共用の行（カードにしない。灰色の家のアイコンと文。警告の色にしない）。
+   出す額が共用の通帳でどう動くかを出すので、給料が共用に入る月は給料の残りも入れた額（jointBook）にする。
+   給料が共用に入る人がいる月だけ、その下に注記「うち 給料の残り n円」を1行足す（いない月は jointBook ＝ jointNet で今までどおり1行） */
 function jointLine(mo, st) {
-  const j = mo.jointNet, est = st === 'estimate';
+  const j = mo.jointBook, est = st === 'estimate';
   const t = j > 0 ? `共用に <b class="num">${fmt(j)}円</b> ${est ? '残る見込み' : '残ります'}`
     : j < 0 ? `共用の残高から <b class="num">${fmt(j)}円</b> ${est ? '出る見込み' : '出ます'}`
     : (est ? '共用の残高は変わらない見込み' : '共用の残高は変わりません');
-  return `<p class="jline">${avatar('joint', 20, true)}<span>${t}</span></p>`;
+  const sub = mo.salaryLeft > 0 ? `<p class="note jline-sub">うち 給料の残り ${fmt(mo.salaryLeft)}円</p>` : '';
+  return `<p class="jline">${avatar('joint', 20, true)}<span>${t}</span></p>${sub}`;
 }
 /* S-20 計算を見る ▾（数字の入った式は開いた先だけ。§6.1-5）。文字のボタン 16px semibold、開いているあいだは ▴ */
 function calcSection(mo) {
@@ -1597,9 +1681,10 @@ function calcSection(mo) {
     h += `<div class="calc">`;
     for (const p of ['a', 'b']) {
       const tr = mo.transferred[p];
-      h += `<p class="calc-n">${esc(whoName(p))}${selfMark(p)}</p><p class="num">出す額 ${fmt(mo.contrib[p])} − もう払った分 ${fmt(mo.adv[p])}${tr ? ` ${tr > 0 ? '−' : '＋'} 済んだ分 ${fmt(tr)}` : ''}</p>`;
+      const js = mo.jointSalary[p];
+      h += `<p class="calc-n">${esc(whoName(p))}${selfMark(p)}</p><p class="num">出す額 ${fmt(mo.contrib[p])} − もう払った分 ${fmt(mo.adv[p])}${js ? ` − 共用に入った給料 ${fmt(js)}` : ''}${tr ? ` ${tr > 0 ? '−' : '＋'} 済んだ分 ${fmt(tr)}` : ''}</p>`;
     }
-    h += `<p class="calc-n">共用</p><p class="num">出す額の合計 ${fmt(mo.contrib.a + mo.contrib.b)} − 支出の合計 ${fmt(mo.total)}</p>`;
+    h += `<p class="calc-n">共用</p><p class="num">出す額の合計 ${fmt(mo.contrib.a + mo.contrib.b)} − 支出の合計 ${fmt(mo.total)}${mo.salaryLeft ? ` ＋ 給料の残り ${fmt(mo.salaryLeft)}` : ''}</p>`;
     if (!CALC.isLockedStatus(mo.status)) h += `<button type="button" class="btn-text" data-act="openS21">手取りを変える</button>`;
     h += `</div>`;
   }
@@ -1638,8 +1723,10 @@ function renderS20() {
   const bothZero = mo.decided && mo.remaining.a === 0 && mo.remaining.b === 0 && !mo.hasTransferred;
   /* その場の1行は押したボタンの直下に出す（at: main = 主ボタン、a・b = そのカードのチェック、redo = 精算をやり直す、status = 押したボタンが消えたとき） */
   const msgAt = (at) => (S.s20msg && S.s20msg.m === m && S.s20msg.at === at ? `<p class="${S.s20msg.kind === 'err' ? 'err' : 'inl'}" role="alert">${esc(S.s20msg.t)}</p>` : '');
-  /* 数字の無い式は、チェックの記録が無いときだけ（redo と、やり直したあとの transfer・settled では出さない。済んだ分の合計が 0 でも） */
-  const showFormula = ['estimate', 'ready', 'transfer', 'settled'].includes(st) && !mo.hasDone;
+  /* 数字の無い式は、チェックの記録が無いときだけ（redo と、やり直したあとの transfer・settled では出さない。済んだ分の合計が 0 でも）。
+     その月に給料が共用に入る人がいるときも出さない（式に「− 共用に入った給料」が無く、カードの金額と合わなく見えるため。§6.1-5・§6.3 ケースN） */
+  const showFormula = ['estimate', 'ready', 'transfer', 'settled'].includes(st) && !mo.hasDone
+    && mo.jointSalary.a + mo.jointSalary.b === 0;
   let h = `<div class="screen" data-screen="S-20" data-state="${st}">` + monthBar('S20', m) + offlineLine();
   h += `<p class="stline" tabindex="-1"><span class="st-t">${s20StatusLine(st, mo, bothZero)}</span>${showFormula ? '<span class="st-sp" aria-hidden="true">　</span><span class="st-f">動かす額 ＝ 出す額 − もう払った分</span>' : ''}</p>`;
   h += msgAt('status');
@@ -1684,8 +1771,10 @@ SHEETS['S-21'] = (sh) => {
   const rows = ['a', 'b'].map((p) => {
     const rate = CALC.rateFor(d, m, p);
     const net = sh.net[p], has = net !== '';
+    /* 給料が共用に入る人の行には小さく添える（設定への導線は置かない。B16） */
+    const sj = CALC.salaryToJointFor(d, m, p);
     return `<div class="s21row">
-      <div class="s21h">${avatar(p, 28)}<span class="scard-name">${esc(whoName(p))}${selfMark(p)}</span>${cm[p] ? `<span class="note">決めた: ${esc(whoName(cm[p].by))} ${md(cm[p].at)}</span>` : ''}</div>
+      <div class="s21h">${avatar(p, 28)}<span class="scard-name">${esc(whoName(p))}${selfMark(p)}</span>${sj ? `<span class="note note-sj">給料は共用に入る</span>` : ''}${cm[p] ? `<span class="note note-decided">決めた: ${esc(whoName(cm[p].by))} ${md(cm[p].at)}</span>` : ''}</div>
       <div class="s21f"><span id="net-lab-${p}">手取り</span><button type="button" class="netfield ${sh.target === p ? 'on' : ''}" id="net-${p}" data-act="netTarget" data-arg="${p}" data-g="net-${p}" aria-pressed="${sh.target === p}" aria-label="${esc(whoName(p))}の手取り ${has ? fmt(Number(net)) + '円' : '未入力'}">${has ? fmt(Number(net)) : ''}</button><span style="white-space:nowrap">× ${rate}% ＝</span><span class="big20 s21amt" data-big>${has ? yen(plan[p].amount) : ''}</span></div>
     </div>`;
   }).join('');
@@ -1714,6 +1803,8 @@ SHEETS['S-22'] = (sh) => {
   <div class="kv"><span>出す額</span><span class="num">${fmt(mo.contrib[p])}</span></div>
   ${mo.net[p] != null ? `<div class="kv sub"><span>手取り ${fmt(mo.net[p])} × ${mo.ratePct[p]}%</span></div>` : ''}
   <div class="kv"><span>もう払った分</span><span class="num">− ${fmt(mo.adv[p])}</span></div>
+  ${mo.jointSalary[p] ? `<div class="kv"><span>共用に入った給料</span><span class="num">− ${fmt(mo.jointSalary[p])}</span></div>
+  <div class="kv sub"><span>手取り ${fmt(mo.net[p])} のうち 出す額まで</span></div>` : ''}
   ${(mo.done[p] || []).map((x) => `<div class="kv"><span>済んだ分（${md(x.at)} ${x.amount > 0 ? '入れた' : '受け取った'}）</span><span class="num">${x.amount > 0 ? '−' : '＋'} ${fmt(x.amount)}</span></div>`).join('')}
   <hr class="divider">`;
   /* 結果の行: 動かすお金があれば 1段目 流れの印＋動詞、2段目 金額（24px bold・右揃え。redo は「あと ¥3,300」、見込みは --text-sub）。
@@ -1814,17 +1905,28 @@ function s32CatChip(sh) {
   return `<button type="button" class="chip" id="tpl-cat" data-act="s32Grid" aria-labelledby="lab-tplcat tpl-cat"><span class="chip-in" style="color:var(--text-main);${sh.err && sh.err.field === 'cat' ? 'outline:1px solid var(--border-danger)' : ''}">${c ? ic(c.icon, 16) + c.name : '選ぶ'}${ic('chevron-down', 16)}</span></button>`;
 }
 
-/* S-33 人の設定（§4 S-33）。相手の行も開いて直せる。状態 normal / action */
-SHEETS['S-33'] = (sh) => `<div class="sh-root" data-screen="S-33" data-state="${sh.err ? 'action' : 'normal'}">
+/* S-33 人の設定（§4 S-33）。相手の行も開ける。状態 normal（自分の行）/ partner（相手の行）/ action。
+   呼び名と色は2人とも変えられる（相手の打ち間違いを直せるように）。
+   出す割合と給料の入り先は本人だけ（§2.2）。相手の行では読み取り専用の値にして、「本人だけが変えられます」を添える */
+SHEETS['S-33'] = (sh) => {
+  const self = sh.p === S.viewer;
+  const sj = !!sh.salaryToJoint;   /* 下書き（［保存］で保存する）。相手の行は読み取り専用なので S.data と同じ値のまま */
+  return `<div class="sh-root" data-screen="S-33" data-state="${sh.err ? 'action' : (self ? 'normal' : 'partner')}">
   <div style="display:flex;justify-content:center;margin-top:4px"><span class="av av56 av-${sh.color}" id="s33-av" aria-hidden="true">${esc([...sh.name][0] || '')}</span></div>
   <div class="field" data-g="name"><label for="p-name">呼び名</label><input class="inp ${sh.err && sh.err.field === 'name' ? 'bad' : ''}" id="p-name" value="${esc(sh.name)}" data-in="pName" autocomplete="off"${sh.err && sh.err.field === 'name' ? ' aria-invalid="true"' : ''}>${errLine(sh, 'name')}</div>
   <div class="field" data-g="color"><span class="flab" id="lab-color">色</span><div class="colors" role="radiogroup" aria-labelledby="lab-color">${['a', 'b'].map((c) =>
     `<button type="button" role="radio" aria-checked="${c === sh.color}" class="colorbtn ${c === sh.color ? 'on' : ''}" id="p-color-${c}" data-act="s33Color" data-arg="${c}" aria-label="${c === 'a' ? 'ティール' : 'アンバー'}"><span class="cpick-${c}">${c === sh.color ? ic('check', 16) : ''}</span></button>`).join('')}</div></div>
-  <div class="field" data-g="rate"><label for="p-rate">出す割合</label><div style="display:flex;align-items:center;gap:8px"><input class="inp num ${sh.err && sh.err.field === 'rate' ? 'bad' : ''}" id="p-rate" inputmode="numeric" pattern="[0-9]*" value="${esc(sh.rate)}" data-in="pRate" style="max-width:120px;text-align:right" autocomplete="off"${sh.err && sh.err.field === 'rate' ? ' aria-invalid="true"' : ''}><span style="font-size:var(--fs-lg)">%</span></div>${errLine(sh, 'rate')}</div>
-  <p class="note" style="margin-top:8px">割合の変更は、出す額をまだ決めていない月から</p>
+  ${self
+    ? `<div class="field" data-g="rate"><label for="p-rate">出す割合</label><div style="display:flex;align-items:center;gap:8px"><input class="inp num ${sh.err && sh.err.field === 'rate' ? 'bad' : ''}" id="p-rate" inputmode="numeric" pattern="[0-9]*" value="${esc(sh.rate)}" data-in="pRate" style="max-width:120px;text-align:right" autocomplete="off"${sh.err && sh.err.field === 'rate' ? ' aria-invalid="true"' : ''}><span style="font-size:var(--fs-lg)">%</span></div>${errLine(sh, 'rate')}</div>
+  <div class="field" data-g="salary"><span class="flab" id="lab-salary">給料の入り先</span>${textSeg('給料の入り先', [['self', '自分の口座'], ['joint', '共用口座']], sj ? 'joint' : 'self', 's33Salary', 'p-salary', 'salary')}</div>
+  <p class="note" style="margin-top:8px">割合は次に決める月から、給料の入り先は決め直した月から</p>`
+    : `<div class="field"><span class="flab">出す割合</span><p class="rov num">${esc(sh.rate)}%</p></div>
+  <div class="field"><span class="flab">給料の入り先</span><p class="rov">${sj ? '共用口座' : '自分の口座'}</p></div>
+  <p class="ro-note">本人だけが変えられます</p>`}
   ${errLine(sh, null)}
   <div class="sh-foot" style="margin-top:12px"><button type="button" class="btn-fill" data-act="s33Save" data-g="save">保存</button></div>
 </div>`;
+};
 
 /* S-34 パスワードを変える（§4 S-34）。状態 normal（入力前・入力中）/ action。
    欄の1行（8文字以上にしてください）は欄の下、欄に結びつかない1行（オンラインで直せます）は注記と固定部分のあいだ（S-33 と同じ形）。
@@ -2300,7 +2402,7 @@ ACT.s21Decide = () => {
   if (empty) { sh.target = empty; return sheetErr('手取りを入れてください'); }
   commit(() => {
     const d = S.data, cm = d.contributions[m] || (d.contributions[m] = {});
-    /* 決めた月を決め直すときは、その月に保存した割合のまま（CALC.rateFor） */
+    /* 決めた月を決め直すときは、その月に保存した割合のまま（CALC.rateFor）。給料の入り先は今の設定になる */
     Object.assign(cm, MODEL.decideContributions(d, m, { a: Number(sh.net.a), b: Number(sh.net.b) }, S.viewer, today()));
     return `${mShort(m)}の出す額を決めました`;
   });
@@ -2452,24 +2554,38 @@ ACT.s32Stop = () => {
   commit(() => { t.until = until; return `${t.name}をやめました（${mShort(until)}から）`; });
   dropSheet(); render();
 };
-const s33Sheet = (p) => ({ id: 'S-33', p, name: S.data.people[p].name, color: S.data.people[p].color, rate: String(S.data.people[p].ratePct), err: null, dirty: false });
+const s33Sheet = (p) => ({ id: 'S-33', p, name: S.data.people[p].name, color: S.data.people[p].color, rate: String(S.data.people[p].ratePct), salaryToJoint: !!S.data.people[p].salaryToJoint, err: null, dirty: false });
 ACT.openS33 = (p) => openSheet(s33Sheet(p));
 INPUT.pName = (v, el) => { S.sheet.name = v; S.sheet.dirty = true; clearTypedErr(S.sheet, el, 'normal'); const av = $('#s33-av'); if (av) av.textContent = [...v][0] || ''; };
 INPUT.pRate = (v, el) => { S.sheet.rate = v; S.sheet.dirty = true; clearTypedErr(S.sheet, el, 'normal'); };
 ACT.s33Color = (c) => { S.sheet.color = c; S.sheet.dirty = true; render(); };
-ACT.s33Save = () => {
+/* 給料の入り先（S-33）。本人だけが変えられる（§2.2）ので、相手の行では読み取り専用にしてこの操作を置かない。
+   押したときは下書き（シート）を変えるだけで、［保存］で保存する（§1.3・§1.4。呼び名・色・出す割合と同じ）。
+   トースト「給料の入り先を『共用口座』にしました　元に戻す」は保存したときに出す（「元に戻す」は commit の巻き戻しに乗る）。
+   オフラインのときは切り替えない（S-33 のほかの操作と同じく「オンラインで直せます」を固定部分の直上に出す） */
+ACT.s33Salary = (v) => {
   const sh = S.sheet;
+  if (sh.p !== S.viewer) return;
+  if (S.offline) return sheetErr('オンラインで直せます', 'info');
+  S.sheet.salaryToJoint = (v === 'joint'); S.sheet.dirty = true; render();
+};
+ACT.s33Save = () => {
+  const sh = S.sheet, self = sh.p === S.viewer;
   if (S.offline) return sheetErr('オンラインで直せます', 'info');
   const name = sh.name.trim();
   if (!name) return sheetErr('呼び名を入れてください', 'err', { field: 'name' });
   if (charLen(name) > 6) return sheetErr('呼び名は6文字までです', 'err', { field: 'name' });
+  /* 出す割合は本人の行でだけ直せる（相手の行は読み取り専用。欄も無い） */
   const r = sh.rate.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).trim();
-  if (!/^\d{1,3}$/.test(r) || +r > 100) return sheetErr('0〜100で入れてください', 'err', { field: 'rate' });
+  if (self && (!/^\d{1,3}$/.test(r) || +r > 100)) return sheetErr('0〜100で入れてください', 'err', { field: 'rate' });
   commit(() => {
     const d = S.data, me = d.people[sh.p], ot = d.people[other(sh.p)];
-    me.name = name; me.ratePct = +r;
+    me.name = name; if (self) me.ratePct = +r;
+    /* 給料の入り先も本人の行でだけ保存する。変わったときはトーストでそれを知らせる（§1.4） */
+    const changed = !!me.salaryToJoint !== !!sh.salaryToJoint;
+    if (self) me.salaryToJoint = !!sh.salaryToJoint;
     if (me.color !== sh.color) { ot.color = me.color; me.color = sh.color; }   /* 片方を選ぶと相手は残りの色 */
-    return '保存しました';
+    return changed ? `給料の入り先を『${sh.salaryToJoint ? '共用口座' : '自分の口座'}』にしました` : '保存しました';
   });
   dropSheet(); render();
 };
@@ -2515,13 +2631,16 @@ const LIMITS = {
   'S-14:fixed': { blue: 1, gMax: 7, gDesign: '4', big: 0, inp: 0, b9: true },
   'S-15': { blue: 1, gMax: 7, gDesign: '3 (+1)', big: 0, inp: 0, b9: true },
   /* 実測の操作グループ: prep・empty 2 ／ undecided 3 ／ estimate 4（月切替・カード・計算を見る・この月を精算する）／ ready・redo 4 ／ transfer・settled 5 */
-  'S-20': { blue: 1, gMax: 7, gDesign: '2〜5', big: 3, inp: 0, b9: true },
+  'S-20': { blue: 1, gMax: 7, gDesign: '2〜5', big: 2, inp: 0, b9: true },
   'S-21': { blue: 1, gMax: 7, gDesign: '4', big: 2, inp: 2, b9: true },
   'S-22': { blue: 0, gMax: 7, gDesign: '0', big: 1, inp: 0 },
   'S-30': { blue: 0, gMax: 7, gDesign: '5 (+1)', big: 0, inp: 0 },   /* ふたりの行・毎月の支払い・記録の払った人・パスワード・ログアウト（Safari なら ＋ホーム画面に追加） */
   'S-31': { blue: 1, gMax: 5, gDesign: '3', big: 1, inp: 0 },
   'S-32': { blue: 1, gMax: 7, gDesign: '6 (+1)', big: 0, inp: 2, b9: true },
-  'S-33': { blue: 1, gMax: 7, gDesign: '4', big: 0, inp: 2 },
+  /* S-33 自分の行（normal・action）: 呼び名・色・出す割合・給料の入り先・保存 ＝ 5。
+     相手の行（partner）は出す割合と給料の入り先が読み取り専用なので 呼び名・色・保存 ＝ 3・入力欄 1（§2.2） */
+  'S-33': { blue: 1, gMax: 7, gDesign: '5', big: 0, inp: 2 },
+  'S-33:partner': { blue: 1, gMax: 7, gDesign: '3', big: 0, inp: 1 },
   'S-34': { blue: 1, gMax: 7, gDesign: '2', big: 0, inp: 1 },
 };
 
@@ -2588,6 +2707,8 @@ const JUMPS = [
   ['S-32:action', 'S-32 action（名前が空）', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = { ...s32Sheet(null), focus: null, err: { t: '名前を入れてください', kind: 'err', field: 'name' } }; })],
   ['S-33:normal', 'S-33 人の設定（まさと）', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = s33Sheet('a'); })],
   ['S-33:action', 'S-33 action（呼び名が7文字以上）', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = { ...s33Sheet('a'), name: 'まさとまさとま', err: { t: '呼び名は6文字までです', kind: 'err', field: 'name' } }; })],
+  ['S-33:normal:salary', 'S-33 人の設定（給料の入り先が共用口座）', J('sep-open', 'b', () => { S.tab = 'S-30'; S.data.people.b.salaryToJoint = true; S.sheet = s33Sheet('b'); })],
+  ['S-33:partner', 'S-33（相手の行）出す割合と給料の入り先は読み取り専用', J('sep-open', 'a', () => { S.tab = 'S-30'; S.sheet = s33Sheet('b'); })],
   ['S-34:normal', 'S-34 パスワードを変える', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = { id: 'S-34', pw: '', show: false, err: null }; })],
   ['S-34:action', 'S-34 action（8文字未満）', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = { id: 'S-34', pw: 'abc', show: false, err: { t: '8文字以上にしてください', kind: 'err', field: 'pw' } }; })],
 ];
@@ -2758,9 +2879,12 @@ function liveChecks() {
     const ok = s.total === s.adv.a + s.adv.b + s.joint
       && s.byCat.reduce((a, x) => a + x.amount, 0) === s.total
       && s.fixedSum === s.fixedRows.filter(CALC.isCounted).reduce((a, e) => a + e.amount, 0)
-      && (!mo.decided || (mo.jointNet === mo.settle.a + mo.settle.b - mo.joint && mo.remaining.a === mo.settle.a - mo.transferred.a && mo.remaining.b === mo.settle.b - mo.transferred.b));
+      && (!mo.decided || (mo.jointNet === mo.settle.a + mo.settle.b + mo.jointSalary.a + mo.jointSalary.b - mo.joint
+        && mo.jointBook === mo.jointNet + mo.salaryLeft
+        && mo.jointBook === mo.salaryIn.a + mo.salaryIn.b + Math.max(mo.settle.a, 0) + Math.max(mo.settle.b, 0) - mo.joint - Math.max(-mo.settle.a, 0) - Math.max(-mo.settle.b, 0)
+        && mo.remaining.a === mo.settle.a - mo.transferred.a && mo.remaining.b === mo.settle.b - mo.transferred.b));
     const dir = (n) => (n > 0 ? `入れる ${fmt(n)}` : n < 0 ? `受け取る ${fmt(n)}` : '0');
-    const detail = `支出 ${fmt(mo.total)}` + (mo.decided ? ` ／ まさと ${dir(mo.remaining.a)} ／ りさこ ${dir(mo.remaining.b)} ／ 共用 ${mo.jointNet < 0 ? '出る' : '残る'} ${fmt(mo.jointNet)}` : ' ／ 出す額 未定');
+    const detail = `支出 ${fmt(mo.total)}` + (mo.decided ? ` ／ まさと ${dir(mo.remaining.a)} ／ りさこ ${dir(mo.remaining.b)} ／ 共用 ${mo.jointBook < 0 ? '出る' : '残る'} ${fmt(mo.jointBook)}${mo.salaryLeft ? `（うち 給料の残り ${fmt(mo.salaryLeft)}）` : ''}` : ' ／ 出す額 未定');
     return { m, ok, detail };
   });
 }
@@ -2777,12 +2901,15 @@ function updateInspect() {
   let blue = [...root.querySelectorAll('.btn-fill')].filter(vis).length;
   const big = [...root.querySelectorAll('[data-big]')].filter(vis).length;
   const inputs = [...root.querySelectorAll('input:not([type=date]):not([type=checkbox]), .netfield')].filter(vis).length;
-  const L = LIMITS[scr + ':' + st] || LIMITS[scr] || { blue: 1, gMax: 7, gDesign: '—', big: 0, inp: 0 };
+  /* S-33 は相手の行でも呼び名が空なら data-state が action になるので、画面IDだけでは自分の行の上限（5・入力欄2）を引いてしまう。
+     相手の行（出す割合と給料の入り先が読み取り専用。§2.2）は状態によらず 'S-33:partner' を先に引く */
+  const key = (scr === 'S-33' && S.sheet && S.sheet.p !== S.viewer) ? 'S-33:partner' : scr + ':' + st;
+  const L = LIMITS[key] || LIMITS[scr] || { blue: 1, gMax: 7, gDesign: '—', big: 0, inp: 0 };
   const blueMax = scr === 'S-31' && st !== 'empty' ? 0 : L.blue;
   /* B9（§0.4）: 下端に固定した部分の裏に隠れた中身が無いか。対象は LIMITS で b9 が付いた画面だけ。
      シート = 中身がはみ出してスクロールが要るか（scrollHeight − clientHeight）と、固定部分（.sh-foot）の裏に中身が入っていないか
      （.sh-foot より前にある見えている最後の要素の下端 − .sh-foot の上端。正なら隠れている）の大きい方。
-     S-20 = 共用の行（.jline）の下端が固定部分（.s20-foot）の上端より下。
+     S-20 = 共用の行（.jline）と見込みの注記の下端が固定部分（.s20-foot）の上端より下（該当するものをすべて測る）。
      S-10・S-20 = 最初の [data-big] の上端が上から 200px を超える（オフラインの行の分は除く）。
      S-11 = グリッドの上端（200px）と、グリッドの下端がタブバーに隠れないか・スクロールが要らないか */
   const devTop = dev.getBoundingClientRect().top;
@@ -2799,11 +2926,11 @@ function updateInspect() {
       }
     } else {
       if (scr === 'S-20') {
-        /* 共用の行と、見込みの注記（金額待ち n件を含みません）は固定部分に隠れない。「計算を見る」は裏に入ってよい（§4 S-20） */
+        /* 共用の行と、見込みの注記（金額待ち n件を含みません）は固定部分に隠れない。「計算を見る」は裏に入ってよい（§4 S-20）。
+           注記「うち 給料の残り ◯円」（.jline-sub）は B9 の対象に入れない（§0.4 B9） */
         const ft = root.querySelector('.s20-foot');
-        if (ft) for (const sel of ['.jline', ':scope > .note']) {
-          const el = root.querySelector(sel);
-          if (el && vis(el)) b9 = Math.max(b9, Math.round(el.getBoundingClientRect().bottom - ft.getBoundingClientRect().top));
+        if (ft) for (const sel of ['.jline', ':scope > .note:not(.jline-sub)']) {
+          for (const el of root.querySelectorAll(sel)) if (vis(el)) b9 = Math.max(b9, Math.round(el.getBoundingClientRect().bottom - ft.getBoundingClientRect().top));
         }
       }
       if (scr === 'S-20' || scr === 'S-10') {

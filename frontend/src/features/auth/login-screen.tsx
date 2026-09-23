@@ -65,7 +65,8 @@ export function LoginScreen() {
         flexDirection='column'
         justifyContent='center'
         flex='1'
-        py={6}
+        pt={6}
+        pb={8}
       >
         <Box as='h1' fontSize='display' fontWeight='bold' lineHeight='tight' textAlign='center' mb={5}>
           {APP_NAME}

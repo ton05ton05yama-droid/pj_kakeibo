@@ -19,14 +19,15 @@ import {
   PlainAppBar,
   usePageScrolled,
 } from '@/components'
-import { useAddExpense, useDeleteExpense, useHousehold } from '@/data'
+import { getRepository, useAddExpense, useDeleteExpense, useEnqueueExpense, useHousehold } from '@/data'
+import type { NewExpenseInput } from '@/data/repository'
 import { RepositoryError } from '@/data/repository'
 import type { CategoryKey, DateKey } from '@/domain'
 import { CATEGORIES, dateOf, isLockedStatus, monthOf, monthStatus } from '@/domain'
+import { useOnline } from '@/lib/use-online'
 import { AmountSheet, type SubmitResult } from './amount-sheet'
 import { newDraft, type RecordDraft } from './draft'
 import { lockedMessage, recordToastText } from './messages'
-import { useOnline } from './use-online'
 
 /** カテゴリのグリッドの15マス（並びは §8 のとおり。アイコンの名前はカテゴリのキーと同じ。§7.6） */
 const GRID_ITEMS: readonly CategoryGridItem[] = CATEGORIES.map((c) => ({
@@ -46,6 +47,7 @@ export function RecordScreen() {
   const { data: snapshot } = useHousehold()
   const toast = useToast()
   const addExpense = useAddExpense()
+  const enqueueExpense = useEnqueueExpense()
   const deleteExpense = useDeleteExpense()
 
   /** シートに渡す初めの値（null ならシートは閉じている）。元に戻すで入力のまま開き直すので、値ごと持つ */
@@ -72,6 +74,16 @@ export function RecordScreen() {
     toast.show({ text: '入力をやめました', onUndo: () => openSheet(unsaved) })
   }
 
+  /**
+   * 端末に保留した記録を取り消す（保留したときのトーストの「元に戻す」）。
+   * サーバーにはまだ無いので `deleteExpense` ではなく端末の保留から消す（`dropPending`）。
+   * 消えたことは `subscribePending` から `useHousehold` に伝わり、画面が読み直される。
+   * ※ data 層に `useDropPending()` が入ったら、そちらに差し替える（報告の「頼みたいこと」）。
+   */
+  const dropPending = (id: string): void => {
+    void getRepository().dropPending(id)
+  }
+
   const onSubmit = async (current: RecordDraft, date: DateKey): Promise<SubmitResult> => {
     if (snapshot === undefined) return { ok: false, message: { text: 'オンラインで直せます', tone: 'info' } }
     const { data, now } = snapshot
@@ -82,20 +94,34 @@ export function RecordScreen() {
     }
     const id = newExpenseId()
     const amount = Number(current.digits)
+    const input: NewExpenseInput = {
+      id,
+      date,
+      cat: current.cat,
+      amount,
+      payer: current.payer,
+      memo: current.memo.trim(),
+    }
+    /** 端末に保留したか（トーストの文言と「元に戻す」の行き先が変わる。§3.6） */
+    let held = !online
     try {
-      await addExpense.mutateAsync({
-        id,
-        date,
-        cat: current.cat,
-        amount,
-        payer: current.payer,
-        memo: current.memo.trim(),
-      })
+      // オフラインのときは送らずに端末へ保留する（保留するのは記録の追加だけ）
+      if (held) await enqueueExpense.mutateAsync(input)
+      else await addExpense.mutateAsync(input)
     } catch (error) {
       if (error instanceof RepositoryError && error.code === 'month_locked') {
         return { ok: false, message: { text: lockedMessage(monthOf(date), status), tone: 'info' } }
       }
-      return { ok: false, message: { text: 'オンラインで直せます', tone: 'info' } }
+      // オンラインのつもりで送って届かなかったときも、同じように端末へ保留する（§3.6）
+      if (held || !(error instanceof RepositoryError) || error.code !== 'offline') {
+        return { ok: false, message: { text: 'オンラインで直せます', tone: 'info' } }
+      }
+      try {
+        await enqueueExpense.mutateAsync(input)
+      } catch {
+        return { ok: false, message: { text: 'オンラインで直せます', tone: 'info' } }
+      }
+      held = true
     }
     setDraft(null)
     toast.show({
@@ -106,9 +132,9 @@ export function RecordScreen() {
         amount,
         payer: current.payer,
         people: data.people,
-        offline: !online,
+        offline: held,
       }),
-      onUndo: () => deleteExpense.mutate({ id }),
+      onUndo: held ? () => dropPending(id) : () => deleteExpense.mutate({ id }),
     })
     return { ok: true }
   }

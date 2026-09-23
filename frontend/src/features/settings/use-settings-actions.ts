@@ -6,19 +6,33 @@ import {
   useDeleteTemplate,
   useSignOut,
   useStopTemplate,
+  useUpdateContributionRate,
   useUpdateDefaultPayer,
   useUpdatePassword,
   useUpdatePerson,
+  useUpdateSalaryToJoint,
   useUpdateTemplate,
 } from '@/data'
 import type { DefaultPayer, Person, PersonKey } from '@/domain'
 import { monthLabel } from './sheets'
 
+/** 給料の入り先（S-33）。'joint' = 共用口座、'self' = 自分の口座 */
+export type SalaryTo = 'self' | 'joint'
+
+/** 給料の入り先の呼び名（§1.1。セグメントの項目とトーストで同じ言葉を使う） */
+export const SALARY_TO_LABEL: Record<SalaryTo, string> = { self: '自分の口座', joint: '共用口座' }
+
 /** 保存する人の値（S-33） */
 export interface PersonValues {
   name: string
   color: PersonKey
+  /**
+   * 本人の行か（§2.2。出す割合と給料の入り先は**本人だけ**が変えられるので、
+   * 相手の行では送らない）
+   */
+  own: boolean
   ratePct: number
+  salaryToJoint: boolean
 }
 
 /**
@@ -30,7 +44,7 @@ export interface PersonValues {
 export interface SettingsActions {
   /** 記録の払った人（S-30。その場で保存してトースト） */
   setDefaultPayer: (value: DefaultPayer, previous: DefaultPayer) => Promise<void>
-  /** 呼び名・色・出す割合（S-33） */
+  /** 呼び名・色・出す割合・給料の入り先（S-33。割合と入り先は本人の行だけ。§2.2） */
   savePerson: (person: PersonKey, values: PersonValues, before: Person) => Promise<void>
   /** 毎月の支払いを足す（S-32） */
   addTemplate: (input: TemplateInput) => Promise<void>
@@ -53,6 +67,8 @@ export function useSettingsActions(snapshot: Snapshot | undefined): SettingsActi
 
   const updateDefaultPayer = useUpdateDefaultPayer()
   const updatePerson = useUpdatePerson()
+  const updateContributionRate = useUpdateContributionRate()
+  const updateSalaryToJoint = useUpdateSalaryToJoint()
   const addTemplateM = useAddTemplate()
   const updateTemplateM = useUpdateTemplate()
   const stopTemplateM = useStopTemplate()
@@ -72,17 +88,30 @@ export function useSettingsActions(snapshot: Snapshot | undefined): SettingsActi
     },
 
     async savePerson(person, values, before) {
-      await updatePerson.mutateAsync({ person, ...values })
+      // 直す前の値はここで控える（`before` は読み込んだデータそのものなので、
+      // 書き込んだあとに読むと新しい値になっていて「元に戻す」が効かない）
+      const prev = {
+        name: before.name,
+        color: before.color,
+        ratePct: before.ratePct,
+        salaryToJoint: before.salaryToJoint,
+      }
+      // 呼び名と色は2人とも変えられる。出す割合と給料の入り先は本人の行だけ（§2.2）
+      await updatePerson.mutateAsync({ person, name: values.name, color: values.color })
+      const rateChanged = values.own && values.ratePct !== prev.ratePct
+      const salaryChanged = values.own && values.salaryToJoint !== prev.salaryToJoint
+      if (rateChanged) await updateContributionRate.mutateAsync(values.ratePct)
+      if (salaryChanged) await updateSalaryToJoint.mutateAsync(values.salaryToJoint)
       toast.show({
-        text: '保存しました',
+        // 給料の入り先を変えたときは、何を変えたかが分かる言い方にする（§1.4）
+        text: salaryChanged
+          ? `給料の入り先を『${SALARY_TO_LABEL[values.salaryToJoint ? 'joint' : 'self']}』にしました`
+          : '保存しました',
         onUndo: () => {
           // 色は片方を戻せば相手も残りの色に戻る
-          void updatePerson.mutateAsync({
-            person,
-            name: before.name,
-            color: before.color,
-            ratePct: before.ratePct,
-          })
+          void updatePerson.mutateAsync({ person, name: prev.name, color: prev.color })
+          if (rateChanged) void updateContributionRate.mutateAsync(prev.ratePct)
+          if (salaryChanged) void updateSalaryToJoint.mutateAsync(prev.salaryToJoint)
         },
       })
     },

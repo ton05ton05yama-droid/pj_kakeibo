@@ -1,9 +1,10 @@
 /**
- * §9.6 の検算 V1〜V10（モックの runVerification と同じ値になることを確かめる）。
+ * §9.6 の検算 V1〜V11（モックの runVerification と同じ値になることを確かめる）。
+ * V11（給料が共用に入る月の通帳の動き）は salary-to-joint.test.ts の checkV11 で見る。
  * 正本: docs/03_ui_spec.md §9.6、docs/02_settlement.md §3.3・§9。
  */
 import { describe, expect, it } from 'vitest'
-import { computeSettle, contributionOf, settleModel, summarize } from '../calc'
+import { computeSettle, contributionOf, PERSON_KEYS, settleModel, summarize } from '../calc'
 import { createExpense, skipRow } from '../operations'
 import { buildScenario } from '../sampleData'
 import type { SettleModel } from '../types'
@@ -73,28 +74,30 @@ describe('V2 出す額 ＝ floor(手取り × 割合 ÷ 100)', () => {
   })
 })
 
-describe('V3 精算額 ＝ 出す額 − 立替', () => {
+describe('V3 精算額 ＝ 出す額 − 立替 − 共用に入った給料（§9 の見本データは 共用に入った給料 ＝ 0）', () => {
   for (const { name, md, ex } of SETS) {
     it(name, () => {
       expect(md.settle).toEqual(ex.settle)
       expect(md.contrib.a).not.toBeNull()
-      expect(md.settle?.a).toBe((md.contrib.a ?? 0) - md.adv.a)
-      expect(md.settle?.b).toBe((md.contrib.b ?? 0) - md.adv.b)
+      expect(md.settle?.a).toBe((md.contrib.a ?? 0) - md.adv.a - md.jointSalary.a)
+      expect(md.settle?.b).toBe((md.contrib.b ?? 0) - md.adv.b - md.jointSalary.b)
     })
   }
 })
 
-describe('V4 共用の過不足 ＝ Σ出す額 − 支出合計 ＝ Σ精算額 − 共用払い', () => {
+describe('V4 `joint_net` ＝ Σ出す額 − 支出合計 ＝ Σ精算額 ＋ Σ共用に入った給料 − 共用払い', () => {
   for (const { name, md, ex } of SETS) {
     it(name, () => {
       expect(md.jointNet).toBe(ex.jointNet)
-      expect(md.jointNet).toBe((md.settle?.a ?? 0) + (md.settle?.b ?? 0) - md.joint)
+      expect(md.jointNet).toBe(
+        (md.settle?.a ?? 0) + (md.settle?.b ?? 0) + md.jointSalary.a + md.jointSalary.b - md.joint
+      )
       expect(md.jointNet).toBe((md.contrib.a ?? 0) + (md.contrib.b ?? 0) - md.total)
     })
   }
 })
 
-it('V5 2人とも精算額 < 0 なら 共用の過不足 < 0（ケースE）', () => {
+it('V5 共用に入った給料がすべて 0 の月で 2人とも精算額 < 0 なら 共用の過不足 < 0（ケースE）', () => {
   const c = findCase('E')
   const r = computeSettle(
     { a: contributionOf(c.net.a, 40), b: contributionOf(c.net.b, 40) },
@@ -106,6 +109,23 @@ it('V5 2人とも精算額 < 0 なら 共用の過不足 < 0（ケースE）', (
   expect(r.jointNet).toBeLessThan(0)
   expect(r.settle).toEqual(EXPECT.cases.E.settle)
   expect(r.jointNet).toBe(EXPECT.cases.E.jointNet)
+})
+
+it('V5 の反例 2人とも給料が共用に入る月は、精算額が両方 < 0 でも 共用の過不足 > 0（§6.3 ケースN のエッジ）', () => {
+  const b = buildScenario('sep-ready')
+  for (const p of PERSON_KEYS) {
+    b.data.people[p].salaryToJoint = true
+    const c = b.data.contributions['2026-09']?.[p]
+    if (c) c.salaryToJoint = true
+  }
+  const md = settleModel(b.data, '2026-09', b.now)
+  // 精算額は2人とも「もう払った分の実費だけ受け取る」＝ −立替
+  expect(md.settle).toEqual({ a: -EXPECT.sepFinal.adv.a, b: -EXPECT.sepFinal.adv.b })
+  expect(md.settle?.a).toBeLessThan(0)
+  expect(md.settle?.b).toBeLessThan(0)
+  // それでも出す額ベースの過不足は正のまま（通帳には 313,870 残る）
+  expect(md.jointNet).toBe(1870)
+  expect(md.jointLedger?.balance).toBe(313870)
 })
 
 it('V6 残り ＝ 精算額（新） − 済んだ分', () => {
@@ -179,8 +199,17 @@ it('V9 毎月の支払いのまとまり ＝ 金額ありの行の和', () => {
   expect(m9f.sum.fixedCount).toBe(5)
 })
 
-describe('V10 §6.3 の合成ケース B・C・D・L', () => {
-  it.each(['B', 'C', 'D'] as const)('ケース%s', (id) => {
+/** EXPECT.cases のうち精算額を持つもの（ケースを足したら V10 も自動で増える。モックの v10ids と同じ） */
+type CaseWithSettle = {
+  [K in keyof typeof EXPECT.cases]: 'settle' extends keyof (typeof EXPECT.cases)[K] ? K : never
+}[keyof typeof EXPECT.cases]
+
+describe('V10 §6.3 の合成ケース B・C・C0・D・E・L', () => {
+  it.each(
+    (Object.keys(EXPECT.cases) as (keyof typeof EXPECT.cases)[]).filter(
+      (id): id is CaseWithSettle => 'settle' in EXPECT.cases[id]
+    )
+  )('ケース%s', (id) => {
     const c = findCase(id)
     const r = computeSettle(
       { a: contributionOf(c.net.a, 40), b: contributionOf(c.net.b, 40) },

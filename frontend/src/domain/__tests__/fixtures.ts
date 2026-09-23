@@ -6,7 +6,16 @@
 import { contributionOf } from '../calc'
 import { createExpense, createMonthSettlement } from '../operations'
 import { buildScenario } from '../sampleData'
-import type { CategoryKey, DateTimeKey, HouseholdData, MonthKey, PersonAmounts, PersonKey, S20State } from '../types'
+import type {
+  CategoryKey,
+  DateTimeKey,
+  HouseholdData,
+  MonthKey,
+  PersonAmounts,
+  PersonFlags,
+  PersonKey,
+  S20State,
+} from '../types'
 
 /** undefined を許さずに取り出す（テストの読みやすさのため） */
 export function must<T>(v: T | null | undefined, what: string): T {
@@ -96,7 +105,7 @@ export const EXPECT = {
   cases: {
     B: { settle: { a: 90000, b: -12000 }, jointNet: 28000 },
     C: { settle: { a: 90000, b: 0 }, jointNet: 28000 },
-    C0: { settle: { a: 0, b: 0 }, jointNet: 10000 },
+    C0: { settle: { a: 0, b: 0 }, jointNet: -10000 },
     D: { settle: { a: 90000, b: 65000 }, jointNet: -22000 },
     E: { settle: { a: -10000, b: -7000 }, jointNet: -32000 },
     L: { contribA: 113382 },
@@ -136,6 +145,8 @@ export interface SettleCase {
   adv: PersonAmounts
   joint: number
   transferred?: PersonAmounts
+  /** 給料の入り先（§6.3 ケースN）。既定は2人とも「自分の口座」 */
+  salaryToJoint?: PersonFlags
 }
 
 export const CASES: SettleCase[] = [
@@ -216,6 +227,7 @@ export function buildCaseData(c: SettleCase): { data: HouseholdData; now: DateTi
   const mk = (p: PersonKey) => ({
     net: c.net[p],
     ratePct: 40,
+    salaryToJoint: c.salaryToJoint?.[p] ?? false,
     amount: contributionOf(c.net[p], 40),
     by: p,
     at: '2026-09-01',
@@ -266,8 +278,8 @@ export function buildCaseData(c: SettleCase): { data: HouseholdData; now: DateTi
     rec.round = 1
     rec.transferred = { ...c.transferred }
     rec.done = {
-      a: [{ amount: c.transferred.a, at: '2026-10-02T09:10', by: 'a' }],
-      b: [{ amount: c.transferred.b, at: '2026-10-02T12:30', by: 'b' }],
+      a: [{ amount: c.transferred.a, at: '2026-10-02T09:10', by: 'a', round: 1 }],
+      b: [{ amount: c.transferred.b, at: '2026-10-02T12:30', by: 'b', round: 1 }],
     }
     d.settlements['2026-09'] = rec
   }

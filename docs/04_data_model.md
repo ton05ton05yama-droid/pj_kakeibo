@@ -1,8 +1,8 @@
 # データモデル（Supabase）
 
-- 版: 1.5（2026-09-23。ユーザーの決定〈仕様書 §12.1 Q2〉で **月の途中でも精算できる**ようにした: `settle_confirm` から「締め待ちの月だけ」の条件を外し〈`open` でも押せる〉、`private.s20_state()` に `p_settle_mode` を足し、`defer_expense` から `month_not_ended` を外し、`app_status` のお知らせ行を「月が終わった精算中の月」だけにした。あわせて 〈§12.1 Q9〉で初期データの呼び名・ID を **まさと `masato` ／ りさこ `risako`** に確定させた。**テーブル・制約・RLS は変えていない**。1.4 は同日、ユーザーの決定〈仕様書 §12.1 Q3〉で `household_members.default_payer`〈記録の既定の払った人。本人だけが変えられる〉と RPC `update_default_payer` を足した。1.3 は同日、カテゴリの初期データを15件にし〈仕様書 §8。`subscriptions` → `entertainment`、`medical`・`big_purchase`・`tax` を追加〉、画面の対応表に S-04〈月を選ぶ〉を足したもの〈1.3 ではテーブル・制約・RLS・RPC を変えていない〉。1.2 は同日、記録をタブにしたのに合わせて S-11・S-12 の呼び方を直したもの。1.1 は同日、出す額の元に戻すをサーバーの控え〈`private.contribution_undo`〉から戻す形にしたもの）
+- 版: 1.7（2026-09-23。ユーザーの決定〈仕様書 §12.1 Q27〉で **出す額を決め直したときは `salary_to_joint` だけ `household_members` のいまの値で上書きする**ようにした: `decide_contributions` の `on conflict do update` で `salary_to_joint = excluded.salary_to_joint`〈`contribution_rate` は今までどおり保存値のまま〉にし、元に戻すために `private.contribution_undo.rows` に `salary_to_joint` を控え、`undo_decide_contributions` が前の値に戻すようにした〈§2.6・§8.3〉。**0001〜0008 は本番に流し済みなので書き換えず、新しいマイグレーション `supabase/migrations/0009_salary_redecide.sql` として足す**〈§11〉。1.6 は同日、ユーザーの決定〈仕様書 §12.1 Q25・Q26〉で **給料の入り先**を足し、**出す割合と給料の入り先を本人だけ**が変えられるようにした: `household_members.salary_to_joint` と `month_contributions.salary_to_joint`〈決めた時点のスナップショット。割合と同じ〉を足し、`private.month_live` の式を `精算額 ＝ 出す額 − 立替 − 共用に入った給料` に直し、`joint_balance`・`salary_in`・`salary_applied`・`salary_remainder`・`has_salary_to_joint` を返すようにし、`decide_contributions` が給料の入り先も月に控えるようにし、`update_member` が**相手の行では割合を変えない**ようにして、本人限定の RPC `update_contribution_rate`・`update_salary_to_joint` を足した〈`update_default_payer` と同じ仕組み。§2.2・§6.1・§8〉。**0001〜0007 は本番に流し済みなので書き換えず、新しいマイグレーション `supabase/migrations/0008_salary_to_joint.sql` として足した**〈§11〉。1.5 は同日、ユーザーの決定〈仕様書 §12.1 Q2〉で **月の途中でも精算できる**ようにした: `settle_confirm` から「締め待ちの月だけ」の条件を外し〈`open` でも押せる〉、`private.s20_state()` に `p_settle_mode` を足し、`defer_expense` から `month_not_ended` を外し、`app_status` のお知らせ行を「月が終わった精算中の月」だけにした。あわせて 〈§12.1 Q9〉で初期データの呼び名・ID を **まさと `masato` ／ りさこ `risako`** に確定させた。**テーブル・制約・RLS は変えていない**。1.4 は同日、ユーザーの決定〈仕様書 §12.1 Q3〉で `household_members.default_payer`〈記録の既定の払った人。本人だけが変えられる〉と RPC `update_default_payer` を足した。1.3 は同日、カテゴリの初期データを15件にし〈仕様書 §8。`subscriptions` → `entertainment`、`medical`・`big_purchase`・`tax` を追加〉、画面の対応表に S-04〈月を選ぶ〉を足したもの〈1.3 ではテーブル・制約・RLS・RPC を変えていない〉。1.2 は同日、記録をタブにしたのに合わせて S-11・S-12 の呼び方を直したもの。1.1 は同日、出す額の元に戻すをサーバーの控え〈`private.contribution_undo`〉から戻す形にしたもの）
 - 位置づけ: データ（テーブル・制約・RLS・RPC）の**正本**。画面は `docs/03_ui_spec.md`（以下「仕様書」）、お金の計算と月の状態は仕様書 §4.0.2・§6（実装の詳細は `docs/02_settlement.md`。以下「02」）が正本で、この文書はそれを実装できる形に落としたもの。
-- 状態: **草案**。この文書の SQL（`sql` のコードブロックを上から順に流したもの）は、2026-09-22 に Supabase の Postgres イメージ（`public.ecr.aws/supabase/postgres:17.6.1.167`）で適用し、仕様書 §9 の見本データ（8月・9月の全シナリオ）を流して、合計・動かす額・共用の過不足が仕様書 §9.6 と一致すること、RLS が §2.2 の権限表どおりに拒否することを確かめた（§11。見本データを流す SQL は、まだリポジトリに無い）。**2026-09-23 に変えた `settle_confirm`・`private.s20_state`・`defer_expense`・`app_status`（仕様書 §12.1 Q2）と、足した `household_members.default_payer`・`update_default_payer`（Q3）は、まだこの検証を流していない**（§11 の「まだのこと」）。Supabase の本番プロジェクトではまだ動かしていない。
+- 状態: **草案**。この文書の SQL（`sql` のコードブロックを上から順に流したもの）は、2026-09-22 に Supabase の Postgres イメージ（`public.ecr.aws/supabase/postgres:17.6.1.167`）で適用し、仕様書 §9 の見本データ（8月・9月の全シナリオ）を流して、合計・動かす額・共用の過不足が仕様書 §9.6 と一致すること、RLS が §2.2 の権限表どおりに拒否することを確かめた（§11。見本データとシナリオの SQL は `supabase/tests/`〈`bash supabase/tests/run.sh` で1コマンド〉）。**2026-09-23 に変えた・足した関数〈Q2・Q3・Q25・Q26〉も `bash supabase/tests/run.sh` で流して確かめた**（§11）。`month_summary()` は本体を置いたが端末からはまだ呼んでおらず、Supabase の本番プロジェクトでも動かしていない。
 - 実装に移すときは `supabase/migrations/` にこの SQL を分けて置き、この文書と同じ変更で直す。
 
 ---
@@ -82,14 +82,15 @@ create table public.households (
   created_at  timestamptz not null default now()
 );
 
--- 人の設定（呼び名・色・出す割合は2人とも変えられる。記録の既定の払った人だけ本人だけ。仕様書 §2.2）
+-- 人の設定（呼び名・色は2人とも変えられる。出す割合・給料の入り先・記録の既定の払った人は本人だけ。仕様書 §2.2・§12.1 Q26）
 create table public.household_members (
   household_id      uuid not null references public.households(id) on delete cascade,
   user_id           uuid not null references auth.users(id) on delete cascade,
   position          smallint not null check (position in (1, 2)),              -- 並び順（まさと 1 → りさこ 2。2台で同じ）
   display_name      text not null check (char_length(display_name) between 1 and 6),  -- 呼び名（6文字まで）
   color             text not null check (color in ('teal', 'amber')),          -- teal = --who-a、amber = --who-b
-  contribution_rate smallint not null default 40 check (contribution_rate between 0 and 100),  -- 出す割合（%）
+  contribution_rate smallint not null default 40 check (contribution_rate between 0 and 100),  -- 出す割合（%）。本人だけが変えられる（仕様書 §2.2・§12.1 Q26）
+  salary_to_joint   boolean not null default false,                                            -- 給料の入り先（S-33。false = 自分の口座、true = 共用口座。本人だけが変えられる。仕様書 §1.1・§2.2・§12.1 Q25・Q26）
   default_payer     text not null default 'self' check (default_payer in ('self', 'joint')),   -- 記録の既定の払った人（S-30。self = 自分、joint = 共用。本人だけが変えられる。仕様書 §1.1・§2.2・§12.1 Q3）
   updated_by        uuid references auth.users(id),
   updated_at        timestamptz not null default now(),
@@ -111,7 +112,10 @@ create table public.profiles (
 - 表示名・割合は `auth.users` の `user_metadata` に持たない（Auto Confirm で上書きされる不具合。platform.md §2.2 の4）。
 - 表示はライトだけ（仕様書 §3.9）なので、表示の設定は DB にも端末にも持たない。
 - **`default_payer`（記録の既定の払った人）は端末ではなく人に持つ**（2台目でログインしても同じ既定になる。仕様書 S-30）。`profiles`（本人だけのテーブル）ではなくここに置いたのは、呼び名・色・割合と同じ「人の設定」で、S-12 が払った人のアバター・呼び名を読むときと同じ行から取れるため。**本人だけが変えられる**きまりは、テーブルへの update を grant せず（§6.3）RPC `update_default_payer`（`where user_id = auth.uid()`）だけで守る。`update_member` はこの列に触れない（2人とも変えられる列だけを直す）。
+- **`salary_to_joint`（給料の入り先）も同じ置き方**（2026-09-23。仕様書 §12.1 Q25）。人に持ち、**本人だけ**が変えられる。守り方は `default_payer` と同じ**本人限定の RPC**（`update_salary_to_joint`。`where user_id = auth.uid()`）にそろえた。**列の grant やトリガーでは守らない**（`household_members` に update を grant していないので、端末は RPC 以外からこの列を書けない。仕組みを1つに保つ。§6.3）。**出す割合（`contribution_rate`）も同じ扱いに変え**、本人限定の RPC `update_contribution_rate` を足した（2026-09-23。仕様書 §12.1 Q26）。`update_member`（呼び名・色）は**相手の行では割合に触れない**（§8.3）。
+- `salary_to_joint` と `contribution_rate` の**本人だけ**は、**RPC で守る**（列の grant とトリガーではない）。どちらにしたかの決めはここに書く（仕様書 §2.2 の権限表・§6.1 の対応表と同じ）。
 - `default_payer` は 2026-09-23 に足した列（仕様書 §12.1 Q3）。**まだ本番に入れていないので、この `create table` に直接書いた。** 入れた後に足すときは `alter table public.household_members add column default_payer text not null default 'self' check (default_payer in ('self', 'joint'));`（既定があるので、いる2行はそのまま「自分」になる）と `update_default_payer` の `create or replace` を同じマイグレーションで流す。列の grant は増やさない。
+- **`salary_to_joint` は本番に流したあとに足す列**なので、`create table` の形（上）と同時に、**新しいマイグレーション `supabase/migrations/0008_salary_to_joint.sql`** で足す（0001〜0007 は書き換えない。§11・`docs/06_setup.md` §2）: `alter table public.household_members add column if not exists salary_to_joint boolean not null default false;`（既定があるので、いる2行はそのまま「自分の口座」）。列の grant は増やさない（テーブル単位の select のまま）。
 
 ### 2.3 カテゴリ
 
@@ -210,6 +214,7 @@ create table public.month_contributions (
   user_id           uuid not null references auth.users(id),
   net_income        integer not null check (net_income between 0 and 9999999),        -- 手取り
   contribution_rate smallint not null check (contribution_rate between 0 and 100),      -- 決めたときの割合（%）
+  salary_to_joint   boolean not null default false,                                     -- 決めたときの給料の入り先（割合と同じスナップショット。仕様書 §6.2・§12.1 Q25）
   contribution      integer generated always as ((net_income * contribution_rate) / 100) stored,  -- 出す額 ＝ floor(手取り × 割合 ÷ 100)
   decided_by        uuid not null default auth.uid() references auth.users(id),        -- 「決めた: まさと 9/1」
   decided_at        timestamptz not null default now(),
@@ -218,6 +223,9 @@ create table public.month_contributions (
 ```
 
 - 割合を月ごとに保存するので、あとで割合を変えても決めた月の出す額は変わらない（仕様書 §2.2）。決め直すときも保存した割合を使う（仕様書 S-21）。
+- **`salary_to_joint` は少し違う**（2026-09-23。仕様書 §12.1 Q25・Q27）: 出す額を決めたときの給料の入り先を月に控えるので、あとで S-33 で変えても決めた月の精算は動かない。**ただし決め直す（もう一度 `decide_contributions` を呼ぶ）と、`household_members.salary_to_joint` のいまの値で上書きする**（`on conflict do update` で `salary_to_joint = excluded.salary_to_joint`。`contribution_rate` は今までどおり上書きしない。§8.3・`0009_salary_redecide.sql`）。割合は「これからこうする」という取り決めだが、給料の入り先は「その月の給料が実際にどこへ入ったか」という**事実**だからで（仕様書 §11 #50）、S-33 で直してから決め直せば合わせられる。上書きするので、**元に戻すための控え（`private.contribution_undo.rows`）には `salary_to_joint` も入れる**（§8.3）。まだ決めていない月は、人の設定のいまの値を使って見込みを出す（`coalesce(c.salary_to_joint, hm.salary_to_joint)`。§5 `month_live`）。ロック中の月は決め直せないので、上書きも起きない。
+- **共用に入った給料**（`joint_salary`）は列に持たない。`salary_to_joint` が true の行で `least(net_income, contribution)` として出せ、精算中・精算済みの月は `month_contributions` がロックされて動かないため（§2.7・§4）。**保存する値を増やさない。**
+- この列も本番に流したあとに足すので、`0008_salary_to_joint.sql` で `alter table public.month_contributions add column if not exists salary_to_joint boolean not null default false;`（いる行はすべて「自分の口座」になり、**8月・9月の出す額と精算額は変わらない**。仕様書 §9.1）。
 - `(net_income * contribution_rate) / 100` は整数の割り算で、非負なので切り捨てと同じ（仕様書 §6.2、02 §6）。
 - 書き込みは RPC だけ（§6.3 で `authenticated` には select だけを許す）。割合と決めた人はサーバーで決める（割合は、新しく作る行なら `household_members.contribution_rate`、決めてある行なら保存済みの値のまま。決めた人は `auth.uid()`）。
 - 元に戻すときの前の値も、端末から受け取らない。`decide_contributions` が書き込む前の行を `private.contribution_undo` に控え、端末には書いた時刻だけを返す。`undo_decide_contributions` は月と時刻だけを受け取り、控えから戻す（§8.3）。
@@ -291,6 +299,8 @@ create table public.settlement_events (
 create index settlement_events_month_idx on public.settlement_events (household_id, month, at);
 ```
 
+- **`month_settlement_lines` に列は足さない**（2026-09-23。仕様書 §12.1 Q25）。`共用に入った給料` は、その月の `month_contributions`（`net_income`・`salary_to_joint`）から `least(net_income, contribution)` で出せる。精算中・精算済みの月は `month_contributions` をだれも直せない（§4）ので、保存したのと同じ値が後からも出る。`settlement` にはすでに引いた後の額（`出す額 − 立替 − 共用に入った給料`）が入る。
+- `month_settlements.joint_net` の意味は変えない（`Σ出す額 − 支出合計`）。**画面の共用の行に出す `joint_balance`**（共用の月間収支）は `joint_net ＋ salary_remainder` で出す（`salary_remainder` ＝ Σ`手取り`（共用に入る人）− Σ`共用に入った給料`）。だから給料の入り先を足しても、**今までの月に保存した値と表示は1円も変わらない**（02 §4）。
 - 済んだ分の求め方: その月の `settlement_checks` の `amount` の合計（全部の回）。やり直した後の締め待ちでは、これがそのまま「済んだ分」になる。もう一度確定するとき、その値を `month_settlement_lines.transferred` に写す（02 §7）。
 - チェックを外すと、その回のチェックの行を消す（`settlement_events` に `uncheck` が残る）。
 
@@ -404,6 +414,11 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- その月の計算（02 §3）。進行中・締め待ちの表示と、確定の値のもと
+--   共用に入った給料_i ＝ その月の給料の入り先が共用なら min(手取り_i, 出す額_i)、そうでなければ 0
+--   精算額_i          ＝ 出す額_i − 立替_i − 共用に入った給料_i
+--   joint_net         ＝ Σ出す額 − 支出合計（意味を変えない。検算 V4）
+--   joint_balance     ＝ Σ手取り(共用に入る人) ＋ Σ精算額 − 共用払い
+--                     ＝ joint_net ＋ salary_remainder                ← 検算 V11（仕様書 §9.6）
 create or replace function private.month_live(p_household uuid, p_month date) returns jsonb
 language sql stable security definer set search_path = '' as $$
   with e as (
@@ -411,7 +426,13 @@ language sql stable security definer set search_path = '' as $$
      where household_id = p_household and accounting_month = p_month
        and amount is not null and not skipped
   ), m as (
-    select hm.user_id, hm.position, c.contribution,
+    select hm.user_id, hm.position, c.contribution, c.net_income,
+           -- その月の給料の入り先: 決めた月は保存した値、決めていなければ人の設定（仕様書 §6.2）
+           coalesce(c.salary_to_joint, hm.salary_to_joint) as salary_to_joint,
+           -- 共用に入った給料 ＝ min(手取り, 出す額)。出す額が決まっていない月は 0
+           case when c.contribution is null then 0
+                when c.salary_to_joint then least(c.net_income, c.contribution)
+                else 0 end::integer as joint_salary,
            coalesce((select sum(e.amount) from e where e.paid_by = hm.user_id), 0)::integer as advance,
            coalesce((select sum(sc.amount) from public.settlement_checks sc
                       where sc.household_id = p_household and sc.month = p_month
@@ -420,16 +441,29 @@ language sql stable security definer set search_path = '' as $$
       left join public.month_contributions c
         on c.household_id = hm.household_id and c.month = p_month and c.user_id = hm.user_id
      where hm.household_id = p_household
+  ), s as (
+    select *,
+           (contribution - advance - joint_salary) as settlement,
+           case when salary_to_joint then coalesce(net_income, 0) else 0 end::integer as salary_in
+      from m
   )
   select jsonb_build_object(
     'members', (select jsonb_agg(jsonb_build_object(
                    'user_id', user_id, 'contribution', contribution, 'advance', advance,
-                   'settlement', contribution - advance, 'transferred', transferred,
-                   'remaining', contribution - advance - transferred) order by position) from m),
+                   'salary_to_joint', salary_to_joint, 'joint_salary', joint_salary,
+                   'settlement', settlement, 'transferred', transferred,
+                   'remaining', settlement - transferred) order by position) from s),
     'joint_paid',         (select coalesce(sum(amount), 0) from e where paid_by is null),
     'expense_total',      (select coalesce(sum(amount), 0) from e),
-    'contribution_total', (select sum(contribution) from m),
-    'joint_net',          (select sum(contribution) from m) - (select coalesce(sum(amount), 0) from e),
+    'contribution_total', (select sum(contribution) from s),
+    'joint_net',          (select sum(contribution) from s) - (select coalesce(sum(amount), 0) from e),
+    -- 共用の通帳の動き（S-20 の共用の行）。給料が共用に入る人がいない月は joint_net と同じ
+    'salary_in',          (select coalesce(sum(salary_in), 0) from s),
+    'salary_applied',     (select coalesce(sum(joint_salary), 0) from s),
+    'salary_remainder',   (select coalesce(sum(salary_in) - sum(joint_salary), 0) from s),
+    'has_salary_to_joint',(select bool_or(salary_to_joint) from s),
+    'joint_balance',      (select coalesce(sum(salary_in), 0) + sum(settlement) from s)
+                            - (select coalesce(sum(amount), 0) from e where paid_by is null),
     'pending_count',      (select count(*) from public.expenses
                             where household_id = p_household and accounting_month = p_month
                               and amount is null and not skipped)
@@ -456,10 +490,14 @@ grant execute on function private.my_household_ids(), private.my_household_id(),
 | 毎月の支払いから作られた行 | 2人 | 自動 | 2人（金額・払った人・今月はなし。カテゴリは変えない） | だれも直せない | `expenses_update_fixed` ＋ 列の grant ＋ トリガー（カテゴリ・名前・日付・帰属月を守る）。足すのは `ensure_month` だけ。消すポリシーは無い |
 | その月の出す額 | 2人 | 2人（相手の分も） | 2人 | だれも直せない | `contributions_select`（読むだけ）。書き込みは RPC `decide_contributions`・`undo_decide_contributions`（definer。所属・月のロック・割合・決めた人を関数の中で決める。元に戻す値は `private.contribution_undo` の控えから取り、端末からは受け取らない）＋ トリガー。テーブルへの直接の insert・update・delete は grant しない |
 | 毎月の支払いのひな形 | 2人 | 2人 | 2人 | 作った行は変わらない | `templates_*`。やめる・追加の取り消しは RPC |
-| 呼び名・色・出す割合 | 2人 | — | 2人（相手の分も） | 決めた月の出す額は変わらない | `members_select`。書き込みは RPC `update_member`（色の入れ替えを1つの取引で行うため） |
+| 呼び名・色 | 2人 | — | 2人（相手の分も） | — | `members_select`。書き込みは RPC `update_member`（色の入れ替えを1つの取引で行うため）。相手の行を渡しても呼び名と色しか変えない |
+| 出す割合 | 2人（DB では `members_select` で2人とも読める） | — | **本人だけ**（2026-09-23。仕様書 §12.1 Q26） | 決めた月の出す額は変わらない（`month_contributions.contribution_rate` に控える） | `household_members.contribution_rate`。書き込みは RPC `update_contribution_rate`（definer。`where user_id = auth.uid()`）と、**本人の行のときだけ**割合に触れる `update_member`。テーブルへの update は grant しない（§6.3） |
+| 給料の入り先 | 2人（同上） | — | **本人だけ**（2026-09-23。仕様書 §12.1 Q25・Q26） | 決めた月の精算は変わらない（`month_contributions.salary_to_joint` に控える） | `household_members.salary_to_joint`。書き込みは RPC `update_salary_to_joint` だけ（definer。`where user_id = auth.uid()`）。`update_member` はこの列に触れない。テーブルへの update は grant しない（§6.3） |
 | 記録の既定の払った人 | 本人（画面に出すのは本人の設定だけ。DB では `members_select` で2人とも読める） | — | **本人だけ** | 変わらない（1件ごとの記録ではないので月のロックと関わらない） | `household_members.default_payer`。書き込みは RPC `update_default_payer` だけ（definer。`where user_id = auth.uid()` で自分の行しか直さない）。テーブルへの update は grant しない（§6.3） |
 | 精算の操作 | 2人 | — | 2人（押した人と時刻を残す） | — | 読むだけのポリシー。書き込みは精算の RPC だけ |
 | パスワード・ログアウト | 本人 | — | 本人 | — | Supabase Auth（`auth.updateUser`・`auth.signOut`）。`profiles` は本人だけ |
+
+- **読むときの正本**: ロック中（精算中・精算済み）の月の割合・給料の入り先は `month_contributions` の控えが正本で、人の設定（`household_members`）は見ない。控えの行が欠けたときの既定は、端末が `false`（`data/types.ts` の `toSettlements`）、SQL が人の設定（`month_live`・`month_summary` の `coalesce`）で食い違うが、ロック中は控えが必ずあるので実際には起きない。
 
 ### 6.2 ポリシー
 
@@ -570,7 +608,7 @@ grant select on public.month_contributions to authenticated;   -- 書き込み�
 ```
 
 - 列の grant は「その列を画面から直すことがある」ものだけ。帰属月・記録した人・金額を入れた人はトリガーが入れる。
-- `household_members` は `select` だけ（`update` を grant しない）。呼び名・色・割合は RPC `update_member`、記録の既定の払った人は RPC `update_default_payer` で書く。`default_payer` を「本人だけ」にできるのは、この RPC が `auth.uid()` の行しか直さないため（§6.1）。
+- `household_members` は `select` だけ（`update` を grant しない）。呼び名・色は RPC `update_member`、出す割合は `update_contribution_rate`（と本人の行のときの `update_member`）、給料の入り先は `update_salary_to_joint`、記録の既定の払った人は `update_default_payer` で書く。**`contribution_rate`・`salary_to_joint`・`default_payer` を「本人だけ」にできるのは、これらの RPC が `auth.uid()` の行しか直さないため**（列の grant やトリガーでは守らない。仕組みを1つにそろえる。§2.2・§6.1）。`month_contributions.salary_to_joint` も同じで、書き込みは `decide_contributions` だけ。
 - ひな形の insert は表単位の grant で、列を絞っていない（列の grant で `start_month` を外すと、端末が送ったときに permission denied になるため）。`start_month` と `created_at` は、端末が送っても §7 のトリガーが DB の値で上書きする。
 - 毎月の支払いの行で直せない列（カテゴリ・日付・メモ）は、列の grant では通ってしまうので、トリガーで止める（§7）。
 
@@ -682,7 +720,7 @@ create trigger templates_before_insert
 | `app_status()` | 起動・タブの切り替え（赤い点・お知らせ行・精算タブの既定の月） | なし | §8.2 | ○（`ensure_month` を含む） | definer |
 | `month_summary(p_month date, p_settle_mode boolean default false)` | S-20・S-21・S-22 | 月、画面が精算のモードか（保存しない。仕様書 §12.1 Q2） | §8.2 | ○（読むだけ） | definer（未実装。`month_live`・`s20_state` と下の表の値を組み立てる） |
 | `ensure_month(p_month date)` | S-10・S-20 を開いたとき、S-32 の追加の後 | 月 | 作った行の数 | ○ | definer |
-| `decide_contributions(p_month date, p_net_incomes jsonb default null)` | S-20［この額で決める］（null）・S-21［決める］（`{"<user_id>": 手取り}`） | 月、手取り | `ok`（`prev`: `{decided_at}`〈書いた時刻だけ。元に戻すに渡す。書き込む前の行はサーバーが `private.contribution_undo` に控える〉）／ `blocked: locked` ／ `blocked: no_previous`（先月の値が無い人の `users`） | ○（null のときは決まっていない人だけ埋める。決めてある行の割合は変えない） | definer |
+| `decide_contributions(p_month date, p_net_incomes jsonb default null)` | S-20［この額で決める］（null）・S-21［決める］（`{"<user_id>": 手取り}`） | 月、手取り | `ok`（`prev`: `{decided_at}`〈書いた時刻だけ。元に戻すに渡す。書き込む前の行はサーバーが `private.contribution_undo` に控える〉）／ `blocked: locked` ／ `blocked: no_previous`（先月の値が無い人の `users`） | ○（null のときは決まっていない人だけ埋める。決めてある行の割合は変えない。**給料の入り先は `household_members` のいまの値で上書きする**。§12.1 Q27） | definer |
 | `undo_decide_contributions(p_month date, p_decided_at timestamptz)` | 出す額を決めたときのトーストの元に戻す | 月、`decide_contributions` が返した `prev.decided_at`（戻す値は受け取らない） | `ok` ／ `blocked: locked`（精算中・精算済み）／ `blocked: changed`（そのあと決め直された・もう戻した・決めたのが自分でない） | ○（2回目は `changed`） | definer |
 | `defer_expense(p_expense_id uuid, p_from_month date, p_undo boolean default false)` | S-15［来月に回す］とその元に戻す | 行、いまの帰属月 | `ok`（新しい帰属月）／ `already` ／ `blocked: not_pending・nothing_to_undo`。翌月がロック中なら例外 `month_locked` | ○（`p_from_month` が違えば何もしない） | definer |
 | `settle_confirm(p_month date, p_expected jsonb default null)` | S-20［この金額で精算］ | 月、見ていたカードの額 `{"<user_id>": remaining}` | `ok`（`status`: confirmed か settled、`round`）／ `already` ／ `blocked: future_month・previous_month・undecided・pending` ／ `stale`（最新の `live`） | ○ | definer |
@@ -690,13 +728,15 @@ create trigger templates_before_insert
 | `settle_reopen(p_month date)` | S-20［精算をやり直す］ | 月 | `ok`（`round`）／ `already` | ○ | definer |
 | `settle_undo_confirm(p_month date, p_round smallint)` | ［この金額で精算］のトーストの元に戻す | 月、回 | `ok` ／ `already` ／ `blocked: checked` | ○ | definer |
 | `settle_undo_reopen(p_month date, p_round smallint)` | ［精算をやり直す］のトーストの元に戻す | 月、回 | `ok`（戻った `status`）／ `already` ／ `blocked: changed` | ○ | definer |
-| `update_member(p_user_id uuid, p_display_name text, p_color text, p_rate smallint)` | S-02（自分の呼び名）・S-33 | 人、呼び名、色、割合 | `ok` | ○ | definer |
+| `update_member(p_user_id uuid, p_display_name text, p_color text, p_rate smallint)` | S-02（自分の呼び名）・S-33 | 人、呼び名、色、割合 | `ok`（例外 `bad_rate`） | ○ | definer。**相手の行では割合を変えない**（呼び名と色だけ。`p_rate` が null のときも今の値のまま。2026-09-23。仕様書 §12.1 Q26） |
+| `update_contribution_rate(p_rate smallint)` | S-33（自分の行の「出す割合」） | 0〜100 | `ok`（`contribution_rate`。例外 `bad_rate`） | ○ | definer。`where user_id = auth.uid()` で自分の行だけ |
+| `update_salary_to_joint(p_salary_to_joint boolean)` | S-33（自分の行の「給料の入り先」）とそのトーストの元に戻す | `true` ＝ 共用口座 ／ `false` ＝ 自分の口座 | `ok`（`salary_to_joint`。例外 `bad_salary_to_joint`） | ○ | definer。`where user_id = auth.uid()` で自分の行だけ |
 | `update_default_payer(p_default_payer text)` | S-30 の「記録の払った人」（とそのトーストの元に戻す） | `self` か `joint` | `ok`（`default_payer`） | ○ | definer |
 | `stop_template(p_template_id uuid, p_undo boolean default false)` | S-32［支払いをやめる］とその元に戻す | ひな形 | `ok`（`end_month`: トーストの「（10月から）」） | ○ | definer |
 | `delete_template(p_template_id uuid)` | S-32 の追加の元に戻す | ひな形 | `ok` ／ `blocked: not_found・too_late・locked_rows`（`too_late` = 作った人でない・作ってから1分を過ぎた・行が直された。02 §10 C13） | ○ | definer |
 | `ping()` | 一時停止を防ぐ外部からの呼び出し（`docs/05_platform.md` §3.1） | なし | `1` | ○ | invoker（`anon` 可。テーブルに触れない） |
 
-記録の払った人の元に戻すは `update_default_payer(前の値)`（トーストの「元に戻す」。値は2つしかないので、画面が持っていた前の値をそのまま渡す）。チェックの元に戻すは `settle_set_check(…, false)`、（自動の）精算済みの元に戻すは最後のチェックを `false` にする。出す額を決めたのの元に戻すは `undo_decide_contributions(月, 決めたときに返った prev.decided_at)`（サーバーの控えから、新しく作った行は消し、上書きした行は手取り・決めた人・時刻を前の値に戻す。割合は戻さない。02 §2.5）。金額・払った人・今月はなしの元に戻すは、直す前の値で `expenses` を update し直す。
+給料の入り先の元に戻すは `update_salary_to_joint(前の値)`（トーストの「元に戻す」。値は2つしかないので、画面が持っていた前の値をそのまま渡す。§8.3）。記録の払った人の元に戻すは `update_default_payer(前の値)`（トーストの「元に戻す」。値は2つしかないので、画面が持っていた前の値をそのまま渡す）。チェックの元に戻すは `settle_set_check(…, false)`、（自動の）精算済みの元に戻すは最後のチェックを `false` にする。出す額を決めたのの元に戻すは `undo_decide_contributions(月, 決めたときに返った prev.decided_at)`（サーバーの控えから、新しく作った行は消し、上書きした行は手取り・**給料の入り先**・決めた人・時刻を前の値に戻す。割合はもともと動かないので戻さない。02 §2.5）。金額・払った人・今月はなしの元に戻すは、直す前の値で `expenses` を update し直す。
 
 ### 8.2 判定の出力
 
@@ -723,6 +763,9 @@ create trigger templates_before_insert
 
 **`month_summary(p_month)`**（`sep-ready`・9月。画面に要る値をまとめて返す）
 
+- **端末はいまこの RPC を呼んでいない**。表示の正本は `frontend/src/domain`（`calc.ts`・`operations.ts`）で、端末は `loadSnapshot()` で読んだ行から計算している。将来これに取り替えるときは、金額待ち（`pending`）の並びを frontend の `sortPending` と同じ「対象月の古い順 → `fixed_cost_templates.created_at` 順」にそろえる。
+- **出す額を決めていない人がいる月の `joint_net`・`joint_balance` は部分和**（`sum()` が NULL を飛ばすので「決めた人の分だけ」が返り、null にはならない）。端末は同じ月を null にする（`settleModel` の `jointNet`・`jointLedger`）。**この RPC を使うときにそろえる**。
+
 ```json
 {
   "month": "2026-09-01",
@@ -734,8 +777,10 @@ create trigger templates_before_insert
     {
       "user_id": "…a", "position": 1,
       "contribution": {"net_income": 300000, "rate": 40, "amount": 120000,
+                       "salary_to_joint": false,
                        "decided_by": "…a", "decided_at": "2026-09-01T…"},
       "previous_net_income": 295000,
+      "salary_to_joint": false, "joint_salary": 0,
       "advance": 37510, "settlement": 82490, "transferred": 0, "remaining": 82490,
       "direction": "in",
       "check": null,
@@ -743,7 +788,9 @@ create trigger templates_before_insert
     },
     {"user_id": "…b", "position": 2, "…": "…", "settlement": 65930, "remaining": 65930, "direction": "in"}
   ],
-  "joint": {"joint_paid": 146550, "expense_total": 206130, "contribution_total": 208000, "joint_net": 1870},
+  "joint": {"joint_paid": 146550, "expense_total": 206130, "contribution_total": 208000, "joint_net": 1870,
+            "salary_in": 0, "salary_applied": 0, "salary_remainder": 0,
+            "has_salary_to_joint": false, "joint_balance": 1870},
   "pending": {"count": 0, "items": []},
   "blocker": null
 }
@@ -751,6 +798,8 @@ create trigger templates_before_insert
 
 - `view_state` は `private.s20_state(household, month, settle_mode)`。`settle_mode` は端末が持つ「月の途中に［この月を精算する］を押したか」（保存しない。仕様書 §12.1 Q2・§11 #45）で、`month_summary` の引数として受け取り、そのまま渡す。`blocker` は［この金額で精算］を押したら止まる理由（`previous_month` など。月の途中でも同じ）。
 - 進行中・締め待ちは `private.month_live()` から、精算中・精算済みは `month_settlement_lines` と `month_settlements` の保存値から作る。
+- `salary_to_joint`（その月の給料の入り先）と `joint_salary`（共用に入った給料 ＝ `min(手取り, 出す額)`）は 2026-09-23 に足した（仕様書 §12.1 Q25）。`settlement` はすでに `joint_salary` を引いた額。S-22 の「共用に入った給料 − ◯」の行は `joint_salary > 0` の人だけに出し、その下の注記は「手取りのうち 出す額まで」（金額を出さないので `contribution.net_income` は要らない。仕様書 S-22）。
+- `joint` の `joint_net` は意味を変えない（`Σ出す額 − 支出合計`）。**S-20 の共用の行に出すのは `joint_balance`**（＝ `joint_net` ＋ `salary_remainder`）で、その下の注記「うち 給料の残り ◯円」は `salary_remainder`。**注記を出すのは `salary_remainder > 0` のときだけ**（`has_salary_to_joint` は注記の要否ではなく、その月に給料が共用に入る人がいるかを表す出力。S-21 の「給料は共用に入る」は人ごとの `people[].salary_to_joint` で出す）。給料が共用に入る人がいない月は `joint_balance` ＝ `joint_net`・`salary_remainder` ＝ 0 で、**今までの月の出力は変わらない**。
 - `direction` は `remaining` の符号（`in` / `out` / `none`）。`check` はその回のチェック（押した人・時刻）、`past_checks` はそれまでの回のチェック（S-22 `redo` の「済んだ分（10/2 入れた）− 82,490」）。
 - `pending.items` は S-20 `prep` の「精算のまえに」の行（名前・対象月）。全件を入れる（S-15 の順送りに使う。S-20 `prep` の表示は3件まで）。並びは仕様書 S-20 要素3 のとおり（払う人が個人の行 → 共用の行。それぞれの中は対象月の古い順、同じならひな形の順。端末で並べ替えてよい）。
 - `previous_net_income` は、S-20 `undecided` の「先月の手取りで」と、その行の出す額に使う（null なら「—」にし、主ボタンを［出す額を決める］にする）。S-21 では欄の初期値に使う（null なら欄は空）。
@@ -1030,13 +1079,14 @@ create table private.contribution_undo (
   month        date not null check (month = date_trunc('month', month)::date),
   decided_at   timestamptz not null,                          -- その decide で書いた時刻（書いた行の decided_at と同じ）
   decided_by   uuid not null references auth.users(id),       -- 決めた人（元に戻せるのはこの人だけ）
-  rows         jsonb not null,                                -- 書き込む前の行 {"<user_id>": null | {"net_income", "decided_by", "decided_at"}}
+  rows         jsonb not null,                                -- 書き込む前の行 {"<user_id>": null | {"net_income", "salary_to_joint", "decided_by", "decided_at"}}
   primary key (household_id, month, decided_at)
 );
 revoke all on private.contribution_undo from public, anon, authenticated;
 
 -- 出す額を決める。p_net_incomes が null なら「この額で決める」（決まっていない人を 先月の手取り × いまの割合 で）。
 -- 割合と決めた人はサーバーで決める: 新しく作る行は household_members の割合、決めてある行は保存済みの割合のまま（仕様書 S-21）。
+-- 給料の入り先（salary_to_joint）は割合と違い、決め直しでも household_members のいまの値で上書きする（仕様書 §12.1 Q27・§11 #50。0009_salary_redecide.sql）。
 -- 書き込む前の行（行が無かった人は null）は private.contribution_undo に控え、端末には書いた時刻（prev.decided_at）だけを返す。
 create or replace function public.decide_contributions(p_month date, p_net_incomes jsonb default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -1072,18 +1122,19 @@ begin
        and not exists (select 1 from public.month_contributions c
                         where c.household_id = v_household and c.month = v_month and c.user_id = hm.user_id);
     insert into public.month_contributions
-      (household_id, month, user_id, net_income, contribution_rate, decided_by, decided_at)
-    select v_household, v_month, hm.user_id, p.net_income, hm.contribution_rate, v_uid, now()
+      (household_id, month, user_id, net_income, contribution_rate, salary_to_joint, decided_by, decided_at)
+    select v_household, v_month, hm.user_id, p.net_income, hm.contribution_rate, hm.salary_to_joint, v_uid, now()
       from public.household_members hm
       join public.month_contributions p
         on p.household_id = hm.household_id and p.month = v_prev and p.user_id = hm.user_id
      where hm.household_id = v_household
     on conflict (household_id, month, user_id) do nothing;
   else
-    -- 書き込む前の行: 手取りを送ってきた人（家計の人だけ）。割合は控えない（決め直しで割合は変わらないため）
+    -- 書き込む前の行: 手取りを送ってきた人（家計の人だけ）。割合は控えない（決め直しで割合は変わらないため）。
+    -- 給料の入り先は決め直しで上書きするので控える（仕様書 §12.1 Q27。2026-09-23）
     select jsonb_object_agg(hm.user_id::text,
              case when c.user_id is null then 'null'::jsonb
-                  else jsonb_build_object('net_income', c.net_income,
+                  else jsonb_build_object('net_income', c.net_income, 'salary_to_joint', c.salary_to_joint,
                                           'decided_by', c.decided_by, 'decided_at', c.decided_at) end)
       into v_rows
       from jsonb_object_keys(p_net_incomes) k
@@ -1091,14 +1142,16 @@ begin
       left join public.month_contributions c
         on c.household_id = v_household and c.month = v_month and c.user_id = hm.user_id;
     insert into public.month_contributions
-      (household_id, month, user_id, net_income, contribution_rate, decided_by, decided_at)
-    select v_household, v_month, hm.user_id, (x.value)::integer, hm.contribution_rate, v_uid, now()
+      (household_id, month, user_id, net_income, contribution_rate, salary_to_joint, decided_by, decided_at)
+    select v_household, v_month, hm.user_id, (x.value)::integer,
+           hm.contribution_rate, hm.salary_to_joint, v_uid, now()
       from jsonb_each_text(p_net_incomes) x
       join public.household_members hm
         on hm.household_id = v_household and hm.user_id = (x.key)::uuid
     on conflict (household_id, month, user_id) do update
       set net_income        = excluded.net_income,
           contribution_rate = public.month_contributions.contribution_rate,  -- 決めてある月は保存した割合のまま（上書きしない）
+          salary_to_joint   = excluded.salary_to_joint,                      -- 給料の入り先は決め直しで household_members のいまの値に（仕様書 §12.1 Q27。2026-09-23）
           decided_by        = excluded.decided_by,
           decided_at        = excluded.decided_at;
     -- 出す額（contribution）は生成列なので、手取りと保存した割合から計算し直される。
@@ -1150,9 +1203,11 @@ begin
    using jsonb_each(v_undo.rows) x
    where c.household_id = v_household and c.month = v_month
      and c.user_id = (x.key)::uuid and x.value = 'null'::jsonb;
-  -- 前の値がある人: 手取り・決めた人・時刻を前の値に戻す（割合は戻さない。決め直しで割合は変わらないため）
+  -- 前の値がある人: 手取り・給料の入り先・決めた人・時刻を前の値に戻す（割合は戻さない。決め直しで割合は変わらないため）
+  -- salary_to_joint は決め直しで上書きされるので戻す（古い控えに入っていなければ、いまの値のまま。仕様書 §12.1 Q27）
   update public.month_contributions c
      set net_income = (x.value ->> 'net_income')::integer,
+         salary_to_joint = coalesce((x.value ->> 'salary_to_joint')::boolean, c.salary_to_joint),
          decided_by = (x.value ->> 'decided_by')::uuid,
          decided_at = (x.value ->> 'decided_at')::timestamptz
     from jsonb_each(v_undo.rows) x
@@ -1269,24 +1324,65 @@ begin
 end $$;
 
 -- 人の設定（S-02・S-33）。色を選ぶと相手は残りの色になる
+-- 呼び名・色は2人とも、出す割合は本人だけ（2026-09-23。仕様書 §2.2・§12.1 Q26）。
+-- 相手の行に p_rate を渡しても割合は変えない。p_rate が null のときも今の値のまま。
 create or replace function public.update_member(p_user_id uuid, p_display_name text, p_color text, p_rate smallint) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   v_uid       uuid := (select auth.uid());
   v_household uuid := private.my_household_id();
+  v_self      boolean := (p_user_id = v_uid);
 begin
   if v_household is null or not private.is_member(v_household, p_user_id) then
     raise exception 'not_member';
+  end if;
+  if p_rate is not null and (p_rate < 0 or p_rate > 100) then
+    raise exception 'bad_rate';
   end if;
   update public.household_members
      set color = case when p_color = 'teal' then 'amber' else 'teal' end,
          updated_by = v_uid, updated_at = now()
    where household_id = v_household and user_id <> p_user_id and color = p_color;
   update public.household_members
-     set display_name = p_display_name, color = p_color, contribution_rate = p_rate,
+     set display_name = p_display_name,
+         color = p_color,
+         contribution_rate = case when v_self then coalesce(p_rate, contribution_rate)
+                                  else contribution_rate end,   -- 割合は本人の行だけ
          updated_by = v_uid, updated_at = now()
    where household_id = v_household and user_id = p_user_id;
   return jsonb_build_object('result', 'ok');
+end $$;
+
+-- 出す割合（S-33 の自分の行）。update_default_payer と同じ仕組み（本人の行だけ）
+create or replace function public.update_contribution_rate(p_rate smallint) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := (select auth.uid());
+begin
+  if p_rate is null or p_rate < 0 or p_rate > 100 then
+    raise exception 'bad_rate';
+  end if;
+  update public.household_members
+     set contribution_rate = p_rate, updated_by = v_uid, updated_at = now()
+   where user_id = v_uid;          -- 自分の行だけ（household_members_user_id_key で1行）
+  if not found then raise exception 'not_member'; end if;
+  return jsonb_build_object('result', 'ok', 'contribution_rate', p_rate);
+end $$;
+
+-- 給料の入り先（S-33 の自分の行）。本人の行だけ（仕様書 §2.2・§12.1 Q25・Q26）
+create or replace function public.update_salary_to_joint(p_salary_to_joint boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := (select auth.uid());
+begin
+  if p_salary_to_joint is null then
+    raise exception 'bad_salary_to_joint';
+  end if;
+  update public.household_members
+     set salary_to_joint = p_salary_to_joint, updated_by = v_uid, updated_at = now()
+   where user_id = v_uid;          -- 自分の行だけ（相手の入り先は変えられない）
+  if not found then raise exception 'not_member'; end if;
+  return jsonb_build_object('result', 'ok', 'salary_to_joint', p_salary_to_joint);
 end $$;
 
 -- 記録の既定の払った人（S-30 の「自分」）。本人の行だけを直す（仕様書 §2.2・§12.1 Q3）
@@ -1379,6 +1475,7 @@ grant execute on function public.ensure_month(date), public.settle_confirm(date,
   public.defer_expense(uuid, date, boolean),
   public.app_status(), public.update_member(uuid, text, text, smallint),
   public.update_default_payer(text),
+  public.update_contribution_rate(smallint), public.update_salary_to_joint(boolean),
   public.stop_template(uuid, boolean), public.delete_template(uuid) to authenticated;
 grant execute on function public.ping() to anon, authenticated;
 ```
@@ -1406,13 +1503,13 @@ grant execute on function public.ping() to anon, authenticated;
 | S-14 `fixed` | `expenses` | `expenses` update（`amount`・`paid_by`・`skipped`） |
 | S-14 `unsent` | 端末の保留 | `expenses` insert（日付を変えて） |
 | S-15 金額を入れる | `expenses`（その行と、同じひな形の前の対象月の行 =「先月 4,380」）、`app_status`（翌月がロックされていないか ＝「来月に回す」を出すか。仕様書 S-15 `canDefer`） | `expenses` update（`amount`・`skipped`）、`defer_expense` |
-| S-20 精算 | `month_summary(月, 精算のモードか)`、`app_status`、`households`（`start_month`。‹ の下限。`months` からは取らない） | `decide_contributions`、`undo_decide_contributions`、`settle_confirm`、`settle_set_check`、`settle_reopen`、`settle_undo_*`。**［この月を精算する］は書かない**（端末が持つ「精算のモード」を立て、`month_summary` に渡して読み直すだけ。保存しない。仕様書 §12.1 Q2・§11 #45） |
-| S-21 出す額 | `month_summary`（手取り・割合・決めた人・先月の手取り）、`household_members` | `decide_contributions(p_month, {user_id: 手取り})`、`undo_decide_contributions` |
-| S-22 1人ぶんの内訳 | `month_summary`（その人の数字とチェック）、`expenses`（その月・`paid_by` = その人・金額あり・今月はなしでない）、`expenses`（その月・`paid_by` = その人・金額待ちで今月はなしでない。`estimate` の注記） | — |
-| S-30 設定 | `household_members`（呼び名・色・出す割合と、自分の `default_payer`）、`fixed_cost_templates`（`end_month` が null のもの〈やめていないもの〉の件数。仕様書 S-30） | `update_default_payer`（「記録の払った人」。その場で保存し、トーストの元に戻すは前の値でもう一度呼ぶ） |
+| S-20 精算 | `month_summary(月, 精算のモードか)`（共用の行は `joint.joint_balance`、注記は `joint.salary_remainder` > 0 のときだけ `joint.salary_remainder`）、`app_status`、`households`（`start_month`。‹ の下限。`months` からは取らない） | `decide_contributions`、`undo_decide_contributions`、`settle_confirm`、`settle_set_check`、`settle_reopen`、`settle_undo_*`。**［この月を精算する］は書かない**（端末が持つ「精算のモード」を立て、`month_summary` に渡して読み直すだけ。保存しない。仕様書 §12.1 Q2・§11 #45） |
+| S-21 出す額 | `month_summary`（手取り・割合・その月の `salary_to_joint`・決めた人・先月の手取り）、`household_members`（**「給料は共用に入る」の添え字は、手取りを入れた人は `household_members.salary_to_joint`〈いまの設定〉、空の人はその月の値**。［決める］で保存される値を出すため。2026-09-23。仕様書 S-21・§12.1 Q27） | `decide_contributions(p_month, {user_id: 手取り})`、`undo_decide_contributions` |
+| S-22 1人ぶんの内訳 | `month_summary`（その人の数字とチェック。**`joint_salary` > 0 なら「共用に入った給料 − ◯」の行と注記**）、`expenses`（その月・`paid_by` = その人・金額あり・今月はなしでない）、`expenses`（その月・`paid_by` = その人・金額待ちで今月はなしでない。`estimate` の注記） | — |
+| S-30 設定 | `household_members`（呼び名・色・出す割合と、自分の `default_payer`。**`salary_to_joint` はここに出さない**〈行の右に出す値は1つだけ。仕様書 S-30〉）、`fixed_cost_templates`（`end_month` が null のもの〈やめていないもの〉の件数。仕様書 S-30） | `update_default_payer`（「記録の払った人」。その場で保存し、トーストの元に戻すは前の値でもう一度呼ぶ） |
 | S-31 毎月の支払い | `fixed_cost_templates`（`end_month` が null のもの。毎月同じの合計・金額待ちの件数・行） | — |
 | S-32 追加・直す | `categories`（`name_hints` で推測）、`fixed_cost_templates` | `fixed_cost_templates` insert → `ensure_month(今月)`、update、`stop_template`、`delete_template`（追加の元に戻す） |
-| S-33 人の設定 | `household_members` | `update_member` |
+| S-33 人の設定 | `household_members`（呼び名・色・出す割合・**給料の入り先**） | `update_member`（呼び名・色。自分の行なら割合も）、`update_contribution_rate`（自分の行の割合）、`update_salary_to_joint`（自分の行の給料の入り先。トーストの元に戻すは前の値でもう一度呼ぶ）。**相手の行では割合と給料の入り先を書かない**（読み取り専用。仕様書 §12.1 Q26） |
 | S-34 パスワード | — | `auth.updateUser({ password })` |
 
 ---
@@ -1455,6 +1552,8 @@ insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 ```
 
 - `default_payer` は書かない（既定の `'self'` ＝ 記録の払った人「自分」。仕様書 S-30・§9.1）。変えるのは本人が S-30 で選んだときだけ。
+- **`salary_to_joint` も書かない**（既定の `false` ＝ 給料の入り先「自分の口座」。仕様書 S-33・§9.1 の見本データの既定と同じ）。変えるのは本人が S-33 で選んだときだけ（`update_salary_to_joint`）。
+- 上の insert に `salary_to_joint` の列を足さないのは、列に既定があるため。**すでに本番に入れた家計でも、`0008_salary_to_joint.sql` の `alter table … add column … default false` でいる2行がそのまま「自分の口座」になる**ので、初期データを入れ直す必要はない（§2.2）。
 
 - `id` は仕様書 §8 の「内部キー」、`name_hints` は仕様書 §8 の「S-32 の名前からの推測」の列に合わせた（モックの `CATEGORIES` の `key` も同じ）。
 - 推測は名前に語が含まれるかで決める。複数のカテゴリに当たったときは仕様書 §8 の決め方（当たった語が一番長いもの、同じ長さなら §8 の並びが先のもの。大文字・小文字は区別しない）。「光熱費」は「光熱」（光熱費）が「光」（通信）より長いので光熱費、「光回線」は「回線」で通信、「住民税」は「税」で税金になる。
@@ -1478,8 +1577,16 @@ insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 - ［この金額で精算］の2回目は `already`、見ていた数字が違うと `stale`、チェックの2回目は同じ結果。元に戻す（確定・やり直し）とその拒否（やり直し後に記録を足した → `changed`）。
 - RLS: りさこはまさとの記録を直せない（0行）・毎月の支払いの行を消せない（0行）・他人名義で足せない（違反）・毎月の支払いの行を直接足せない（違反）。毎月の支払いの行のカテゴリは変えられない（`fixed_row_immutable`）。精算中・精算済みの月には足せず、日付を動かして入れることもできない（`month_locked`）。`anon` は `expenses` を読めず、`ping()` だけ呼べる。
 - 色の入れ替え（まさとを amber にするとりさこが teal になる）、支払いをやめたときの `end_month`（10月分があれば11月から）、ケースL の切り捨て 113,382。
-- **出す額の決め直し（仕様書 S-21）**: まさととして 9月を 300,000 ／ 220,000・割合 40% で決める → S-33 でまさとの割合を 50 にする（`update_member`）→ S-21 で手取り 310,000 で決め直す。結果は **`contribution_rate = 40`・`contribution = 124,000`**（保存した割合のまま）。まだ決めていない 10月を［この額で決める］で決めると、新しく作る行だけが今の割合を使う（まさと 300,000 × 50% ＝ 150,000、りさこ 220,000 × 40% ＝ 88,000）。
-- **出す額の元に戻す（`undo_decide_contributions`。2026-09-23 に、控え〈`private.contribution_undo`〉から戻す形にしてから手順1〜4 で流し直した）**: 決め直したのを戻すと 300,000・40%・120,000 と前の決めた人・時刻に戻る。同じ時刻でもう一度戻すと `blocked: changed`（控えは戻したときに消える）。新しく作った行（10月の［この額で決める］。まさと 300,000 × 50% ＝ 150,000、りさこ 88,000）は戻すと消える（0行）。決めたあと相手が決め直していたら `blocked: changed`。**相手が決めたのを自分が戻すと `blocked: changed`**（相手の時刻を渡しても、控えの決めた人が自分でない）。同じトランザクションで2回決めても控えの主キーで止まらず、戻すとトランザクションの前の値に戻る。精算中の月では、決めるのも戻すのも `blocked: locked`。
+- **給料の入り先（`salary_to_joint`）と、本人だけの出す割合**（2026-09-23。仕様書 §12.1 Q25・Q26。`supabase/migrations/0008_salary_to_joint.sql`）: `bash supabase/tests/run.sh`（`supabase/tests/scenario.sql` の「給料の入り先」の節）で流して確かめた。
+  - **既定のままなら数字が変わらない**: 見本データ（2人とも「自分の口座」）の `sep-ready` で `joint_net` ＝ `joint_balance` ＝ 1,870、`salary_remainder` ＝ 0、`has_salary_to_joint` ＝ false、動かす額は 82,490 ／ 65,930 のまま。
+  - **ケースN（仕様書 §6.3・02 §9.7）**: りさこを `update_salary_to_joint(true)` にして9月の行を作り直すと、りさこ `joint_salary` 88,000・`settlement` −22,070、まさと 82,490、`salary_in` 220,000・`salary_remainder` 132,000・`joint_net` 1,870・`joint_balance` **133,870**。**検算 V11**（`joint_balance` ＝ `joint_net` ＋ `salary_remainder`）も一致。
+  - **月ごとの保存（0008 の時点。2026-09-23 の §12.1 Q27 で決め直しの扱いだけ変えた）**: 決めてある月は、設定を変えただけでは `month_contributions.salary_to_joint` と精算額が動かない。0008 では決め直しても動かなかったので、ケースN の確認では9月のりさこの行をいったん消してから決め直している。**`0009_salary_redecide.sql` を入れてからは、決め直しで `salary_to_joint` が今の設定に入れ替わる**（`contribution_rate` は保存値のまま）ので、行を消さずに `update_salary_to_joint(true)` → 決め直しでケースN が作れる。`run.sh` は `migrations/*.sql` を全部流すので 0009 も入っており、いまの `scenario.sql` はこの形（決め直しでケースN を作り、設定を戻しただけでは動かず、決め直すと戻る）で通っている（2026-09-23。仕様書 §12.1 Q27）。
+  - **本人だけ**: りさこが `update_member(<masato>, …, 99)` を呼んでも まさとの `contribution_rate` は 40 のまま、`update_contribution_rate`・`update_salary_to_joint` は自分の行しか直さない。`household_members` への直接の `update` は `permission denied`、`update_contribution_rate(101)`・`null` は `bad_rate`、`update_salary_to_joint(null)` は `bad_salary_to_joint`。
+- **月の途中の精算**（2026-09-23 に足した。仕様書 §12.1 Q2）: `bash supabase/tests/run.sh`（`supabase/tests/scenario.sql` の「月の途中の精算」の節）で流して確かめた。`kakeibo.today = 2026-09-22` のまま、金額待ちが2件残っていれば `settle_confirm('2026-09-01')` は `pending`、今月より先の 10月は `future_month`。`defer_expense` は今月（9月）の金額待ちでも通る（`month_not_ended` が返らない）。2件を［今月はなし］にすると `private.s20_state(..., true)` が `ready`（`false` なら `estimate`）になり、`settle_confirm` は `ok`。そのとき保存された値は 02 §9.2（9月見込み）の **まさと 90,840 ／ りさこ 69,530 ／ 共用 27,330** と一致した。月の途中に精算しても `app_status` の赤い点は出ず、`settle_reopen` のあと `month_status` は `open` に戻る。
+- **`default_payer` と `update_default_payer`**（2026-09-23 に足した。仕様書 §12.1 Q3）: 同じく `run.sh`（`scenario.sql` の「記録の既定の払った人」の節）で確かめた。いる行の既定は `'self'`、まさとが `'joint'` にしてもりさこの行は `'self'` のまま、`self`・`joint` 以外は `bad_default_payer` で止まり、`update_member`（呼び名・色・割合）は `default_payer` を変えない。`authenticated` が `household_members` を直接 `update` すると `permission denied` になることは、上の「給料の入り先」の節で確かめた。
+- **出す額の決め直し（仕様書 S-21）**: まさととして 9月を 300,000 ／ 220,000・割合 40% で決める → S-33 でまさとの割合を 50 にする（`update_member`）→ S-21 で手取り 310,000 で決め直す。結果は **`contribution_rate = 40`・`contribution = 124,000`**（保存した割合のまま）。**`0009_salary_redecide.sql` を入れてからは、この決め直しで `salary_to_joint` だけが `household_members` のいまの値に入れ替わる**ことも同じ節で確かめている（割合は 40 のまま。2026-09-23。仕様書 §12.1 Q27）。まだ決めていない 10月を［この額で決める］で決めると、新しく作る行だけが今の割合を使う（まさと 300,000 × 50% ＝ 150,000、りさこ 220,000 × 40% ＝ 88,000）。
+- **出す額の元に戻す（`undo_decide_contributions`。2026-09-23 に、控え〈`private.contribution_undo`〉から戻す形にしてから手順1〜4 で流し直した）**: 決め直したのを戻すと 300,000・40%・120,000 と前の決めた人・時刻に戻る（`0009_salary_redecide.sql` のあとは `salary_to_joint` も前の値に戻る。控えに入れてある。§2.6）。同じ時刻でもう一度戻すと `blocked: changed`（控えは戻したときに消える）。新しく作った行（10月の［この額で決める］。まさと 300,000 × 50% ＝ 150,000、りさこ 88,000）は戻すと消える（0行）。決めたあと相手が決め直していたら `blocked: changed`。**相手が決めたのを自分が戻すと `blocked: changed`**（相手の時刻を渡しても、控えの決めた人が自分でない）。同じトランザクションで2回決めても控えの主キーで止まらず、戻すとトランザクションの前の値に戻る。精算中の月では、決めるのも戻すのも `blocked: locked`。
+- **決め直したときの給料の入り先（`0009_salary_redecide.sql`。2026-09-23。仕様書 §12.1 Q27）**: `bash supabase/tests/run.sh`（0001〜0009 を流す）で確かめた。(1) 決めてある月を決め直すと `month_contributions.salary_to_joint` が `household_members` のいまの値になり、`contribution_rate` は保存した 40% のまま、(2) 設定を変えただけでは決めてある月は動かず、決め直したときだけ入り先と動かす額が変わる（りさこ −22,070 ⇄ 65,930）、(3) `undo_decide_contributions` で戻すと `salary_to_joint` も前の値に戻る（控えに入れてある。§2.6）、(4) 見本データ（2人とも「自分の口座」）では V1〜V11 と §9.8 の値が1つも動かない。精算中・精算済みのロック（`blocked: locked`）の分岐は 0005 のまま持っているが、決め直し側の `locked` は自動のシナリオでは確かめていない（下の「まだのこと」）。
 - **端末から任意の `prev` を渡す口が無いこと**: `undo_decide_contributions` の引数は月と時刻だけ（前の形の `(date, jsonb)` で呼ぶと `function … does not exist`）。`authenticated` として `private.contribution_undo` を読むと `permission denied for table contribution_undo`。
 - **出す額の直接の書き込み**: `authenticated` として `month_contributions` に `update`・`insert`・`delete` すると、どれも `permission denied for table month_contributions`。`select` はでき、RPC（`decide_contributions`・`undo_decide_contributions`）では決められる・戻せる。
 - `request.jwt.claims`（JSON）だけを設定して `request.jwt.claim.sub` を設定しないと、このイメージの `auth.uid()` は null になり、RPC は `not_member` で止まる。
@@ -1487,6 +1594,8 @@ insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 - **追加の元に戻す（`delete_template`。同じ回）**: 作った直後は `ok`（ひな形と行が消える。2回目は `blocked: not_found`）。次の場合は `blocked: too_late`: 2か月前のひな形（`created_at` を管理者で2か月前にし、8〜10月分の行がある）、金額を入れた行があるひな形（金額待ちの行に 6,200 を入れた。作った直後でも）、相手が作ったひな形（りさこが作ったものを、まさとが戻す。りさこ本人なら `ok`）、作ってから1分を過ぎたひな形（ほかは手つかず）。`locked_rows` の確かめは残したが、`too_late` を通ったあとは今月（進行中でロックされない）の行しか無いので、今の決まりでは起きない（守りとして残す）。
 
 **再現の手順**
+
+**1コマンドで流せる**: `bash supabase/tests/run.sh`（`frontend` からは `pnpm test:sql`）で、`supabase/migrations/*.sql`（いまは **0001〜0009**）の適用 → 見本データ（仕様書 §9）→ §9.6 の値と §2.2 の権限の確認まで通る。要るのは Docker だけ（`KEEP=1` を付けるとコンテナが残る）。下の手順1〜5 は、その中身を手で追うときのもの。
 
 この文書の SQL は `sql` のコードブロック（§2〜§10）を上から順に流したもの。ただし §10 の「家計と2人」の初期データは `<household_id>` などをダッシュボードで作った値に置き換えるものなので流さず、代わりに下の初期データを流す。下のテスト用の SQL は `pgsql` のブロックにしてあり、「`sql` のブロックを流す」には入らない。
 
@@ -1553,15 +1662,14 @@ insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 
 5. 見本データ（仕様書 §9.4・§9.5）は、管理者（`reset role` のまま）で `expenses` に入れ、シナリオの操作（金額を入れる・来月に回す・確定・チェック・やり直し）は上のように人を真似て RPC で行う。ひな形の `start_month` は §7 のトリガーが「今日」の月で入れるので、見本データのひな形（2026-08-01 に作った）は `set kakeibo.today = '2026-08-01'` にしてから入れる（送った `start_month` は使われない）。終わったら `docker rm -f kakeibo-verify`。
 
-   見本データの insert とシナリオの操作の SQL は、リポジトリに無い（2026-09-22 は手で流した）。流せる形にするのは「まだのこと」の検証スクリプトで行う。
+   見本データの insert とシナリオの操作の SQL は `supabase/tests/` にある（`setup.sql` が「今日」の差し替えと初期データ、`sample_expenses.sql` が見本データの記録、`scenario.sql` が §9.8 のシナリオの操作と検算）。`run.sh` はこの3つを順に流す。
 
 **まだのこと**
 
-- **月の途中の精算**（2026-09-23 に足した。仕様書 §12.1 Q2）の確かめ。手順1〜4 で流して、次を見る: `set kakeibo.today = '2026-09-22'` のまま `settle_confirm('2026-09-01')` が通ること（`not_closing` にならない）、そのとき保存される値が、**金額待ち2件を［来月に回す］（または［今月はなし］）で片付けた場合に** 02 §9.2（9月見込み）の **まさと 90,840 ／ りさこ 69,530 ／ 共用 27,330** と一致すること（金額を入れて片付けると、その分だけ値が変わる）、金額待ちが2件残っていれば `blocked: pending` になること、`defer_expense` が今月（9月）の金額待ちでも `ok` になること（`month_not_ended` が返らない）、`settle_reopen` のあと `month_status` が `open` に戻ること、`app_status` のお知らせ行が 9/22 時点では出ず 10/1 に出ること、`private.s20_state(..., true)` が `prep` ／ `ready` を返し `false` なら `estimate` を返すこと、今月より先の月には `blocked: future_month` が返ること。
-- **`default_payer` と `update_default_payer`**（2026-09-23 に足した。仕様書 §12.1 Q3）の確かめ。手順1〜4 で流して、次を見る: 自分が変えても相手の行が変わらないこと、`self`・`joint` 以外は `bad_default_payer` で止まること、`update_member`（呼び名・色・割合）が `default_payer` を変えないこと、`authenticated` が `household_members` を直接 `update` すると `permission denied` になること、いる行の既定が `'self'` になること。
 - Supabase の本番プロジェクト（PostgREST・supabase-js 経由）での動作。特に `grant usage on schema private` が要ること（ローカルでは要った。platform.md U5）と、Data API の明示 grant の新しい既定での挙動。
-- `month_summary()` の本体（出力の形だけ決めた）。
+- `month_summary()` の本体（04 では出力の形だけを決めていたが、`0008_salary_to_joint.sql` で本体を置いた。端末はまだ呼んでいない〈§8.2〉ので、本番での確かめは残っている）。
 - 2台からの本当の同時実行（アドバイザリーロックの効き目は設計上のもので、並行の負荷テストはしていない）。
 - ひな形の `updated_by` を入れるトリガー、`app_status()` の月の範囲の絞り込み（何年か使った後の速さ）。
   - S-04 と上部バーの ‹ › の下限（家計を作った月）は `months` から取らない形（`households.start_month` を読む。§9 の S-04・S-10・S-20 の行）にしてから絞り込む。
-- **検証を1コマンドにする（実装の最初）**: `supabase/tests/`（か `scripts/verify_sql.sh`）に、SQL の適用 → 見本データ（仕様書 §9）→ §9.6 の値の確認を1コマンドで流す検証を置く。今は上の「再現の手順」を手で流している（見本データのシナリオを流すスクリプトはリポジトリに無い）。
+- **`0009_salary_redecide.sql` の `blocked: locked`**（2026-09-23。仕様書 §12.1 Q27）。決め直し・元に戻す・見本データの値は `run.sh` で確かめ済み（上の「確かめたこと」の (1)〜(4)）。残っているのは、**精算中・精算済みの月で決め直そうとしたときの `blocked: locked`** を自動のシナリオでも確かめること（`decide_contributions` を `create or replace` するだけで、テーブル・制約・RLS は変えていない）。
+- **`0008_salary_to_joint.sql` と `0009_salary_redecide.sql` を本番に流す**（`docs/06_setup.md` §2・§11）。0001〜0007 はもう本番に入っているので**書き換えない**。この文書の `create table` は「これから作る人」のための最終形で、**すでに作った家計に足すぶんは 0008 に書く**（列の `add column if not exists` と、関数の `create or replace`）。この2つが食い違ったら、この文書を正本にして 0008 を直す。

@@ -15,6 +15,7 @@ import type {
   Expense,
   FlowDirection,
   HouseholdData,
+  JointLedger,
   JointNetKind,
   MonthContributions,
   MonthKey,
@@ -23,6 +24,7 @@ import type {
   MonthSummary,
   PersonAmounts,
   PersonAmountsOrNull,
+  PersonFlags,
   PersonKey,
   S20State,
   SettleAmounts,
@@ -45,6 +47,43 @@ export const contributionOf = (net: number, ratePct: number): number => Math.flo
 export function rateFor(d: HouseholdData, m: MonthKey, p: PersonKey): number {
   const c = d.contributions[m]?.[p]
   return c ? c.ratePct : d.people[p].ratePct
+}
+
+/**
+ * その月の給料の入り先（§6.2）。
+ * その月に保存した値があればそれ、無ければ人の設定の値。
+ * 設定を変えただけでは決めた月は動かない。動くのは出す額を決め直したときで、
+ * そのとき今の設定を取り込む（decideContributions。2026-09-23 の決定）。
+ */
+export function salaryToJointFor(d: HouseholdData, m: MonthKey, p: PersonKey): boolean {
+  const c = d.contributions[m]?.[p]
+  return c ? c.salaryToJoint : d.people[p].salaryToJoint
+}
+
+/**
+ * 共用に入った給料_i（§6.2）。
+ * 給料の入り先が共用なら `min(手取り_i, 出す額_i)`、そうでなければ 0。
+ * 手取りが決まっていない月（出す額も決まっていない）は 0。
+ *
+ * 割合は 0〜100 なので、ふつうは 出す額 ≦ 手取り で `min` は 出す額 になる。
+ * 手取り < 出す額 のとき（§6.3 ケースN のエッジ）は手取りまでで止め、
+ * 足りない分（出す額 − 手取り）はそのまま共用へ入れる精算額として残る。
+ */
+export function jointSalaryOf(net: number | null, contrib: number | null, salaryToJoint: boolean): number {
+  if (!salaryToJoint || net === null || contrib === null) return 0
+  return Math.min(net, contrib)
+}
+
+/** 人ごとの 共用に入った給料（§6.2） */
+export function computeJointSalary(
+  net: PersonAmountsOrNull,
+  contrib: PersonAmountsOrNull,
+  salaryToJoint: PersonFlags
+): PersonAmounts {
+  return {
+    a: jointSalaryOf(net.a, contrib.a, salaryToJoint.a),
+    b: jointSalaryOf(net.b, contrib.b, salaryToJoint.b),
+  }
 }
 
 /** 金額待ち ＝ 毎月の支払いの行で、金額が無く、今月はなしでもない（§5.2） */
@@ -113,11 +152,59 @@ export function summarize(expenses: readonly Expense[], m: MonthKey): MonthSumma
   }
 }
 
-/** 精算額_i ＝ 出す額_i − 立替_i、共用の過不足 ＝ Σ出す額 − 支出合計（§6.2） */
-export function computeSettle(contrib: PersonAmounts, adv: PersonAmounts, total: number): SettleAmounts {
+/**
+ * 精算額_i ＝ 出す額_i − 立替_i − 共用に入った給料_i、
+ * 共用の過不足 ＝ Σ出す額 − 支出合計（§6.2）。
+ *
+ * `jointSalary` を渡さなければ 2人とも 0（＝ 給料の入り先がどちらも自分の口座）で、
+ * 今までの式と同じ値になる。
+ */
+export function computeSettle(
+  contrib: PersonAmounts,
+  adv: PersonAmounts,
+  total: number,
+  jointSalary: PersonAmounts = { a: 0, b: 0 }
+): SettleAmounts {
   return {
-    settle: { a: contrib.a - adv.a, b: contrib.b - adv.b },
+    settle: {
+      a: contrib.a - adv.a - jointSalary.a,
+      b: contrib.b - adv.b - jointSalary.b,
+    },
+    jointSalary: { ...jointSalary },
     jointNet: contrib.a + contrib.b - total,
+  }
+}
+
+/**
+ * 共用の通帳の動き（§6.2。S-20 の共用の行と注記）。
+ *
+ *   balance ＝ Σ手取り(共用に入る人) ＋ Σ(正の精算額) − 共用払い − Σ|負の精算額|
+ *           ＝ Σ手取り(共用に入る人) ＋ Σ精算額 − 共用払い
+ *
+ * 検算 V11: これは `(Σ出す額 − 支出合計) ＋ Σ(手取り − 共用に入った給料)` と一致する。
+ */
+export function computeJointLedger(
+  net: PersonAmountsOrNull,
+  salaryToJoint: PersonFlags,
+  jointSalary: PersonAmounts,
+  settle: PersonAmounts,
+  jointNet: number,
+  joint: number
+): JointLedger {
+  let salaryIn = 0
+  let salaryApplied = 0
+  for (const p of PERSON_KEYS) {
+    if (!salaryToJoint[p]) continue
+    salaryIn += net[p] ?? 0
+    salaryApplied += jointSalary[p]
+  }
+  return {
+    salaryIn,
+    salaryApplied,
+    salaryRemainder: salaryIn - salaryApplied,
+    jointNet,
+    balance: salaryIn + settle.a + settle.b - joint,
+    hasSalaryToJoint: salaryToJoint.a || salaryToJoint.b,
   }
 }
 
@@ -152,12 +239,17 @@ export function settleModel(d: HouseholdData, m: MonthKey, now: string): SettleM
     : { a: cm.a ? cm.a.amount : null, b: cm.b ? cm.b.amount : null }
   const net: PersonAmountsOrNull = snap ? { ...snap.net } : { a: cm.a ? cm.a.net : null, b: cm.b ? cm.b.net : null }
   const ratePct: PersonAmounts = snap ? { ...snap.ratePct } : { a: rateFor(d, m, 'a'), b: rateFor(d, m, 'b') }
+  // 給料の入り先は、決めた月は保存した値（あとで設定を変えても動かない。§6.2）
+  const salaryToJoint: PersonFlags = snap
+    ? { ...snap.salaryToJoint }
+    : { a: salaryToJointFor(d, m, 'a'), b: salaryToJointFor(d, m, 'b') }
   const adv: PersonAmounts = snap ? { ...snap.adv } : { ...sum.adv }
   const joint = snap ? snap.joint : sum.joint
   const total = snap ? snap.total : sum.total
   const ca = contrib.a
   const cb = contrib.b
-  const amounts = ca !== null && cb !== null ? computeSettle({ a: ca, b: cb }, adv, total) : null
+  const jointSalary: PersonAmounts = snap ? { ...snap.jointSalary } : computeJointSalary(net, contrib, salaryToJoint)
+  const amounts = ca !== null && cb !== null ? computeSettle({ a: ca, b: cb }, adv, total, jointSalary) : null
   const transferred: PersonAmounts = rec ? { ...rec.transferred } : { a: 0, b: 0 }
   const remaining = amounts ? remainingOf(amounts.settle, transferred) : null
   const done: Record<PersonKey, DoneEntry[]> = rec ? { a: [...rec.done.a], b: [...rec.done.b] } : { a: [], b: [] }
@@ -169,12 +261,17 @@ export function settleModel(d: HouseholdData, m: MonthKey, now: string): SettleM
     contrib,
     net,
     ratePct,
+    salaryToJoint,
     adv,
+    jointSalary,
     joint,
     total,
     decided: amounts !== null,
     settle: amounts ? amounts.settle : null,
     jointNet: amounts ? amounts.jointNet : null,
+    jointLedger: amounts
+      ? computeJointLedger(net, salaryToJoint, jointSalary, amounts.settle, amounts.jointNet, joint)
+      : null,
     transferred,
     remaining,
     checks: rec ? { ...rec.checks } : {},
@@ -264,6 +361,8 @@ export const defaultExpenseMonth = (now: string): MonthKey => monthOf(now)
 export function confirmBlock(d: HouseholdData, m: MonthKey, now: string): ConfirmBlock | null {
   const status = monthStatus(d, m, now)
   if (isLockedStatus(status)) return { reason: 'locked', status }
+  // まだ来ていない月は精算できない（DB の settle_confirm と同じ順で locked の次に見る）
+  if (m > monthOf(now)) return { reason: 'future_month' }
   const prev = addMonth(m, -1)
   if (prev >= d.household.createdMonth) {
     const ps = monthStatus(d, prev, now)

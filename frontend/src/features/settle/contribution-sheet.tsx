@@ -1,12 +1,12 @@
 import { Box, Flex } from '@chakra-ui/react'
 import { useEffect, useMemo, useRef } from 'react'
 import { useAnnounce } from '@/app/providers'
-import { Avatar, BottomSheet, InlineMessage, Keypad, PrimaryButton, SheetHeader } from '@/components'
+import { Avatar, BottomSheet, InlineMessage, Keypad, PrimaryButton } from '@/components'
 import { ButtonBox } from '@/components/primitives'
 import type { DateTimeKey, HouseholdData, MonthKey, PersonKey } from '@/domain'
-import { addMonth, decideContributions, PERSON_KEYS, rateFor } from '@/domain'
+import { addMonth, decideContributions, PERSON_KEYS, rateFor, salaryToJointFor } from '@/domain'
 import { monthDay, monthShort, num, yen } from './format'
-import { BUTTON } from './labels'
+import { BUTTON, SALARY_TO_JOINT_HINT } from './labels'
 import { displayName, whoName } from './people'
 import { type NetDigits, useNetInput } from './use-net-input'
 
@@ -88,97 +88,109 @@ export function ContributionSheet({
       label={`${monthShort(month)}の出す額`}
       onClose={onClose}
       initialFocusRef={ownFieldRef}
-      footer={<PrimaryButton onClick={decide}>{BUTTON.decide}</PrimaryButton>}
+      footer={
+        <Box mt={1}>
+          <PrimaryButton onClick={decide}>{BUTTON.decide}</PrimaryButton>
+        </Box>
+      }
     >
-      <SheetHeader
-        trailing={
-          message ? (
+      <Box data-screen='S-21' data-state={message ? 'action' : 'normal'}>
+        {/* 見出しの行は 28px（共通の SheetHeader は 44px なので、このシートでは使わない。§4 S-21 の縦の寸法） */}
+        <Flex alignItems='center' justifyContent='space-between' gap={2} h='28px'>
+          <Box as='h2' fontSize='xl' fontWeight='bold' lineHeight='tight'>
+            {`${monthShort(month)}の出す額`}
+          </Box>
+          {message ? (
             <Box whiteSpace='nowrap'>
               <InlineMessage tone={message.tone}>{message.text}</InlineMessage>
             </Box>
-          ) : undefined
-        }
-      >
-        {`${monthShort(month)}の出す額`}
-      </SheetHeader>
+          ) : null}
+        </Flex>
 
-      {PERSON_KEYS.map((p) => {
-        const digits = nets[p]
-        const has = digits !== ''
-        const decided = current[p]
-        const name = whoName(data, p)
-        return (
-          <Box key={p} mt={p === 'b' ? 2 : 0}>
-            <Flex alignItems='center' gap={2} h='28px'>
-              <Avatar who={p} name={name} />
-              <Box flex='none' fontSize='lg' fontWeight='semibold' lineHeight='ui'>
-                {displayName(data, p, viewer)}
-              </Box>
-              {decided ? (
-                <Box
-                  ml='auto'
-                  minW='0'
-                  overflow='hidden'
-                  textOverflow='ellipsis'
-                  whiteSpace='nowrap'
-                  fontSize='sm'
-                  color='text.muted'
-                >
-                  {`決めた: ${whoName(data, decided.by)} ${monthDay(decided.at)}`}
+        {PERSON_KEYS.map((p) => {
+          const digits = nets[p]
+          const has = digits !== ''
+          const decided = current[p]
+          const name = whoName(data, p)
+          return (
+            <Box key={p} mt={p === 'b' ? 2 : 0}>
+              <Flex alignItems='center' gap={2} h='28px'>
+                <Avatar who={p} name={name} />
+                <Box flex='none' fontSize='lg' fontWeight='semibold' lineHeight='ui'>
+                  {displayName(data, p, viewer)}
                 </Box>
-              ) : null}
-            </Flex>
-            <Flex alignItems='center' gap='6px' mt={1} fontSize='md' color='text.sub'>
-              <Box as='span'>手取り</Box>
-              <ButtonBox
-                type='button'
-                ref={p === viewer ? ownFieldRef : undefined}
-                onClick={() => setTarget(p)}
-                aria-pressed={target === p}
-                aria-label={`${name}の手取り ${has ? `${num(Number(digits))}円` : '未入力'}`}
-                flex='1'
-                minW='0'
-                h='control'
-                px='10px'
-                textAlign='right'
-                borderRadius='control'
-                border='1px solid'
-                borderColor={target === p ? 'transparent' : 'border.strong'}
-                outline={target === p ? '2px solid' : undefined}
-                outlineColor={target === p ? 'focusRing' : undefined}
-                bg='bg.input'
-                color='text.main'
-                fontSize='lg'
-                fontWeight='medium'
-                fontVariantNumeric='tabular-nums'
-                animation={shaking && target === p ? 'shake 0.32s {easings.out}' : undefined}
-              >
-                {has ? num(Number(digits)) : ''}
-              </ButtonBox>
-              <Box as='span' whiteSpace='nowrap'>{`× ${rateFor(data, month, p)}% ＝`}</Box>
-              <Box
-                minW='96px'
-                textAlign='right'
-                color='text.main'
-                fontSize='2xl'
-                fontWeight='bold'
-                lineHeight='tight'
-                fontVariantNumeric='tabular-nums'
-              >
-                {has ? yen(plan[p]?.amount ?? 0) : ''}
-              </Box>
-            </Flex>
-          </Box>
-        )
-      })}
+                {/* 給料が共用に入る人の名前の右に小さく添える（設定への導線は置かない。B16・§6.3 ケースN） */}
+                {salaryToJointFor(data, month, p) ? (
+                  <Box flex='none' whiteSpace='nowrap' fontSize='sm' color='text.muted' lineHeight='ui'>
+                    {SALARY_TO_JOINT_HINT}
+                  </Box>
+                ) : null}
+                {decided ? (
+                  <Box
+                    ml='auto'
+                    minW='0'
+                    overflow='hidden'
+                    textOverflow='ellipsis'
+                    whiteSpace='nowrap'
+                    fontSize='sm'
+                    color='text.muted'
+                  >
+                    {`決めた: ${whoName(data, decided.by)} ${monthDay(decided.at)}`}
+                  </Box>
+                ) : null}
+              </Flex>
+              <Flex alignItems='center' gap='6px' mt={1} fontSize='md' color='text.sub'>
+                <Box as='span'>手取り</Box>
+                <ButtonBox
+                  type='button'
+                  ref={p === viewer ? ownFieldRef : undefined}
+                  onClick={() => setTarget(p)}
+                  aria-pressed={target === p}
+                  aria-label={`${name}の手取り ${has ? `${num(Number(digits))}円` : '未入力'}`}
+                  flex='1'
+                  minW='0'
+                  h='control'
+                  px='10px'
+                  textAlign='right'
+                  borderRadius='control'
+                  border='1px solid'
+                  borderColor={target === p ? 'transparent' : 'border.strong'}
+                  outline={target === p ? '2px solid' : undefined}
+                  outlineColor={target === p ? 'focusRing' : undefined}
+                  bg='bg.input'
+                  color='text.main'
+                  fontSize='lg'
+                  fontWeight='medium'
+                  fontVariantNumeric='tabular-nums'
+                  animation={shaking && target === p ? 'shake 0.32s {easings.out}' : undefined}
+                >
+                  {has ? num(Number(digits)) : ''}
+                </ButtonBox>
+                <Box as='span' whiteSpace='nowrap'>{`× ${rateFor(data, month, p)}% ＝`}</Box>
+                <Box
+                  minW='96px'
+                  textAlign='right'
+                  color='text.main'
+                  fontSize='2xl'
+                  fontWeight='bold'
+                  lineHeight='tight'
+                  fontVariantNumeric='tabular-nums'
+                >
+                  {has ? yen(plan[p]?.amount ?? 0) : ''}
+                </Box>
+              </Flex>
+            </Box>
+          )
+        })}
 
-      <Box mt={3}>
-        <Keypad
-          onKey={(key) => {
-            typed.current = true
-            press(key)
-          }}
-        />
+        <Box mt={3}>
+          <Keypad
+            onKey={(key) => {
+              typed.current = true
+              press(key)
+            }}
+          />
+        </Box>
       </Box>
     </BottomSheet>
   )

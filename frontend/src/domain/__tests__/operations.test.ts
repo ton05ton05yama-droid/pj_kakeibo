@@ -331,7 +331,7 @@ describe('毎月の支払いの行を作る（§6.5）', () => {
     // 呼ぶたびに別のオブジェクト（月どうしで中身を共有しない）
     const other = createMonthSettlement()
     other.transferred.a = 100
-    other.done.a.push({ amount: 100, at: '2026-10-02T09:10', by: 'a' })
+    other.done.a.push({ amount: 100, at: '2026-10-02T09:10', by: 'a', round: 1 })
     expect(rec.transferred.a).toBe(0)
     expect(rec.done.a).toHaveLength(0)
   })

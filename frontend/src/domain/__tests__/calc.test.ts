@@ -9,6 +9,7 @@ import {
   confirmBlock,
   contributionOf,
   countNewExpenses,
+  defaultExpenseMonth,
   isNewExpense,
   monthsUntil,
   noticeKind,
@@ -91,7 +92,7 @@ describe('その月に使う出す割合（§6.2）', () => {
   it('割合 100 を保存した月は 100（手取りがそのまま出す額）', () => {
     const b = buildScenario('sep-open')
     b.data.contributions['2026-10'] = {
-      a: { net: 300000, ratePct: 100, amount: 300000, by: 'a', at: '2026-10-01T10:00' },
+      a: { net: 300000, ratePct: 100, salaryToJoint: false, amount: 300000, by: 'a', at: '2026-10-01T10:00' },
     }
     expect(rateFor(b.data, '2026-10', 'a')).toBe(100)
     expect(contributionOf(300000, 100)).toBe(300000)
@@ -103,7 +104,7 @@ describe('その月に使う出す割合（§6.2）', () => {
   it('保存した割合が 0 の月は 0（人の設定に落ちない）', () => {
     const b = buildScenario('sep-open')
     b.data.contributions['2026-10'] = {
-      a: { net: 300000, ratePct: 0, amount: 0, by: 'a', at: '2026-10-01T10:00' },
+      a: { net: 300000, ratePct: 0, salaryToJoint: false, amount: 0, by: 'a', at: '2026-10-01T10:00' },
     }
     expect(rateFor(b.data, '2026-10', 'a')).toBe(0)
   })
@@ -180,8 +181,25 @@ describe('止める理由の順は DB と同じ（0005_rpc.sql settle_confirm・
     expect(block).toEqual({ reason: 'locked', status: 'confirmed' })
   })
 
+  it('まだ来ていない月は future_month で止まる（前の月が締め待ちでも）', () => {
+    const b = buildScenario('sep-prep') // いまは 2026-10-01
+    // 10月（今月）は前の月が片付いていないので previous、11月（来月）は future_month
+    expect(confirmBlock(b.data, '2026-10', b.now)).toEqual({ reason: 'previous', m: '2026-09' })
+    expect(confirmBlock(b.data, '2026-11', b.now)).toEqual({ reason: 'future_month' })
+  })
+
   it('お知らせ行の型はそのまま noticeKind に渡せる', () => {
     const a: Attention = { kind: 1, m: '2026-09' }
     expect(noticeKind(a)).toBe('closing')
+  })
+})
+
+describe('支出タブの既定の月は今月（§3.4）', () => {
+  it('その日時のカレンダー月を返す（年またぎ・月初も同じ）', () => {
+    expect(defaultExpenseMonth('2026-09-22T10:00')).toBe('2026-09')
+    // 年またぎ: 12月の末日の23:59 はまだ12月
+    expect(defaultExpenseMonth('2026-12-31T23:59')).toBe('2026-12')
+    // 月初の0:00 はもうその月
+    expect(defaultExpenseMonth('2026-03-01T00:00')).toBe('2026-03')
   })
 })

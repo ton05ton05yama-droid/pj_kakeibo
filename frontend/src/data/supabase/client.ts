@@ -48,7 +48,32 @@ interface PostgrestLikeError {
   details?: string | null
 }
 
-/** DB のエラーを画面の1行（仕様書 §1.4）に結びつく形に変える */
+/**
+ * つながらないときの文面（ブラウザごとに違う）。
+ * Chrome/Edge は 'TypeError: Failed to fetch'、Safari は 'Load failed'、Firefox は 'NetworkError ...'、
+ * iOS の WKWebView は 'Network request failed'。文面に頼り切らず `navigator.onLine` も見る。
+ */
+const OFFLINE_RE = /failed to fetch|load failed|networkerror|network request failed/i
+
+/**
+ * RLS に弾かれた・行が返らなかったときの既定の文言。
+ * どの操作で起きたかは呼び出し側が知っているので、`supabase/index.ts` がこの文言のときだけ
+ * 操作ごとの文言（「相手の記録は直せません」など）に差し替える。
+ */
+export const NOT_ALLOWED = 'この操作はできません'
+
+/** つながっていないとみなすか（文面 ＋ 端末の状態） */
+function isOffline(message: string): boolean {
+  return OFFLINE_RE.test(message) || (typeof navigator !== 'undefined' && navigator.onLine === false)
+}
+
+/**
+ * DB のエラーを画面の1行（仕様書 §1.4）に結びつく形に変える。
+ *
+ * RLS で弾かれた（`42501`）・行が返らなかった（`PGRST116`）は、**理由をここでは決めない**。
+ * 「その月が精算中」なのか「相手の行」なのかは、呼び出し側（S-12・S-14 の画面）が手元の
+ * `monthStatus` で判定済みなので、ここで月の状態を引き直さず `not_allowed` で返す（案1）。
+ */
 export function toRepositoryError(error: PostgrestLikeError): RepositoryError {
   const message = error.message
   if (message.includes('month_locked')) {
@@ -60,7 +85,19 @@ export function toRepositoryError(error: PostgrestLikeError): RepositoryError {
   if (message.includes('not_member')) {
     return new RepositoryError('not_member', '家計に入っていません')
   }
-  if (error.code === 'PGRST301' || message.includes('Failed to fetch')) {
+  // RLS の with check / using に弾かれた（Postgres の 42501）
+  if (error.code === '42501' || message.includes('violates row-level security policy')) {
+    return new RepositoryError('not_allowed', NOT_ALLOWED, error.details ?? null)
+  }
+  // .single() が 0 件（＝ RLS で読めない・その行が無い）
+  if (error.code === 'PGRST116') {
+    return new RepositoryError('not_allowed', NOT_ALLOWED, error.details ?? null)
+  }
+  // JWT の期限切れ。つながっていないのではなく、ログインし直してもらう
+  if (error.code === 'PGRST301') {
+    return new RepositoryError('not_allowed', 'ログインし直してください')
+  }
+  if (isOffline(message)) {
     return new RepositoryError('offline', 'つながりませんでした')
   }
   return new RepositoryError('unknown', message)
@@ -70,7 +107,7 @@ export function toAuthError(error: { message: string; status?: number }): AuthEr
   if (error.status === 400 || error.message.includes('Invalid login credentials')) {
     return new AuthError('invalid_credentials', 'ID かパスワードが違います')
   }
-  if (error.message.includes('Failed to fetch')) {
+  if (isOffline(error.message)) {
     return new AuthError('offline', 'つながりませんでした')
   }
   return new AuthError('unknown', error.message)

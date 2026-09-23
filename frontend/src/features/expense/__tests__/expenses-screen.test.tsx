@@ -10,15 +10,21 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AnnounceProvider } from '@/app/providers/announce-provider'
 import { ToastProvider } from '@/app/providers/toast-provider'
-import { createLocalRepository, setRepository } from '@/data'
+import { createLocalRepository, type Repository, setRepository } from '@/data'
 import type { ScenarioId } from '@/domain'
 import { system } from '@/theme'
 import { ExpensesScreen } from '../expenses-screen'
 import { forgetExpenseMonth } from '../use-expense-month'
 
-async function openExpensesTab(scenario: ScenarioId = 'sep-open', loginId = 'masato'): Promise<void> {
+async function openExpensesTab(
+  scenario: ScenarioId = 'sep-open',
+  loginId = 'masato',
+  /** 画面を出す前にデータをいじる（シナリオに無い状態を作るとき） */
+  prepare?: (repository: Repository) => Promise<void>
+): Promise<void> {
   const repository = createLocalRepository(scenario)
   await repository.auth.signIn(loginId, 'pw')
+  if (prepare) await prepare(repository)
   setRepository(repository)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -37,6 +43,15 @@ async function openExpensesTab(scenario: ScenarioId = 'sep-open', loginId = 'mas
     </ChakraProvider>
   )
   await screen.findByRole('button', { name: /月を選ぶ/ })
+}
+
+/** テンキーの金額（`¥` は別の span なので、まとめて textContent で見る） */
+function shownAmount(sheet: HTMLElement): string | null {
+  for (const node of sheet.querySelectorAll('div')) {
+    const text = node.textContent ?? ''
+    if (/^¥[\d,]+$/.test(text)) return text
+  }
+  return null
 }
 
 beforeEach(() => {
@@ -104,6 +119,16 @@ describe('S-10 の状態', () => {
     await openExpensesTab('sep-prep')
     expect(screen.getByRole('button', { name: /9月の精算ができます/ })).toBeInTheDocument()
     expect(document.querySelector('[data-screen="S-10"]')).toHaveAttribute('data-state', 'action')
+  })
+
+  it('条件2・受け取る側のお知らせ行は「8月: 共用から 4,930円 受け取る」（§9.6 の8月・りさこ）', async () => {
+    // 8月はりさこが受け取る側（精算額 −4,930）。まだ［受け取った］を押していない形に戻す
+    await openExpensesTab('sep-open', 'risako', async (repository) => {
+      await repository.setCheck('2026-08', 'b', false)
+    })
+    expect(screen.getByRole('button', { name: /8月: 共用から 4,930円 受け取る/ })).toBeInTheDocument()
+    // 符号は落とす（「− 4,930円」にしない）
+    expect(screen.queryByText(/-4,930/)).not.toBeInTheDocument()
   })
 })
 
@@ -192,6 +217,20 @@ describe('S-14 記録を見る・直す', () => {
     expect(within(sheet).queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
   })
 
+  it('保存すると、その行に色が付く（§7.5 の 1.2秒のハイライト）', async () => {
+    await openExpensesTab()
+    await userEvent.click(screen.getByRole('button', { name: /食料品 コンビニ 1,280/ }))
+    for (const key of ['2', '0', '0', '0']) {
+      await userEvent.click(screen.getByRole('button', { name: key }))
+    }
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    const row = await screen.findByRole('button', { name: /食料品 コンビニ 2,000/ })
+    expect(getComputedStyle(row).animation).toContain('rowHighlight')
+    // ほかの行には付かない
+    const other = screen.getByRole('button', { name: /外食 ランチ 新着 4,850/ })
+    expect(getComputedStyle(other).animation).not.toContain('rowHighlight')
+  })
+
   it('削除するとトースト「削除しました」が出て、一覧から消える', async () => {
     await openExpensesTab()
     await userEvent.click(screen.getByRole('button', { name: /食料品 コンビニ 1,280/ }))
@@ -242,6 +281,27 @@ describe('S-15 金額を入れる', () => {
     await userEvent.click(screen.getByRole('button', { name: '来月に回す' }))
     expect(await screen.findByText('電気代を10月に回しました')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /電気代（9月分）.*金額を入れる/ })).not.toBeInTheDocument()
+  })
+
+  it('金額を入れたまま背景をタップすると、元に戻すで同じ金額のまま開き直せる（§3.7）', async () => {
+    await openExpensesTab()
+    await userEvent.click(screen.getByRole('button', { name: /ガス代（9月分）.*金額を入れる/ }))
+    for (const key of ['6', '2', '0', '0']) {
+      await userEvent.click(screen.getByRole('button', { name: key }))
+    }
+    const sheet = screen.getByRole('dialog', { name: '金額を入れる（ガス代（9月分））' })
+    expect(shownAmount(sheet)).toBe('¥6,200')
+
+    // 背景幕（シートのすぐ前にある）をタップして閉じる
+    const backdrop = sheet.previousElementSibling
+    if (!(backdrop instanceof HTMLElement)) throw new Error('背景幕が見つかりません')
+    await userEvent.click(backdrop)
+    expect(screen.queryByRole('dialog', { name: '金額を入れる（ガス代（9月分））' })).not.toBeInTheDocument()
+    expect(await screen.findByText('入力をやめました')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '元に戻す' }))
+    const again = await screen.findByRole('dialog', { name: '金額を入れる（ガス代（9月分））' })
+    expect(shownAmount(again)).toBe('¥6,200')
   })
 
   it('今月はなしにすると、金額待ちから外れる', async () => {

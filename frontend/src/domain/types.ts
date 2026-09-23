@@ -78,6 +78,8 @@ export type JointNetKind = 'remain' | 'draw' | 'same'
 export type PersonAmounts = Record<PersonKey, number>
 /** 人ごとの金額（決まっていなければ null） */
 export type PersonAmountsOrNull = Record<PersonKey, number | null>
+/** 人ごとの ある・なし（給料の入り先など） */
+export type PersonFlags = Record<PersonKey, boolean>
 
 /** 人（§9.1） */
 export interface Person {
@@ -87,8 +89,13 @@ export interface Person {
   name: string
   /** 識別色（§7.2）。a = ティール、b = アンバー */
   color: PersonKey
-  /** 出す割合（% の整数。§6.2） */
+  /** 出す割合（% の整数。§6.2）。**本人だけが変えられる**（§2.2。2026-09-23 の決定） */
   ratePct: number
+  /**
+   * 給料の入り先（S-33）。true = 共用口座に入る、false = 自分の口座（既定）。
+   * **本人だけが変えられる**（お金の入り方は本人の事情なので、出す割合と同じ扱い。§2.2）
+   */
+  salaryToJoint: boolean
   /** 記録の払った人の既定（S-30） */
   defaultPayer: DefaultPayer
   /** 最後に S-10 を見た日時（新着の判定。§1.1）。null = まだ見ていない */
@@ -164,6 +171,11 @@ export interface Contribution {
   net: number
   /** 決めたときの割合（% の整数） */
   ratePct: number
+  /**
+   * 決めたときの給料の入り先（§6.2）。割合と同じで、あとで設定を変えても
+   * 決めた月の精算は変わらない。
+   */
+  salaryToJoint: boolean
   /** 出す額 ＝ floor(net × ratePct ÷ 100) */
   amount: number
   /** 決めた人 */
@@ -189,6 +201,8 @@ export interface DoneEntry {
   amount: number
   at: DateTimeKey
   by: PersonKey
+  /** そのチェックを付けた回（DB の settlement_checks.round と同じ。やり直しの元に戻すが使う） */
+  round: number
 }
 
 /** ［この金額で精算］の時点に保存する値（§6.2 の最後の項） */
@@ -196,7 +210,11 @@ export interface SettlementSnapshot {
   contrib: PersonAmounts
   net: PersonAmountsOrNull
   ratePct: PersonAmounts
+  /** 決めたときの給料の入り先（§6.2） */
+  salaryToJoint: PersonFlags
   adv: PersonAmounts
+  /** 共用に入った給料 ＝ 給料の入り先が共用なら min(手取り, 出す額)、そうでなければ 0（§6.2） */
+  jointSalary: PersonAmounts
   joint: number
   total: number
   settle: PersonAmounts
@@ -278,8 +296,33 @@ export interface MonthSummary {
 
 /** 精算額と共用の過不足（§6.2） */
 export interface SettleAmounts {
+  /** 精算額 ＝ 出す額 − 立替 − 共用に入った給料 */
   settle: PersonAmounts
+  /** 共用に入った給料（給料の入り先が自分の口座の人は 0） */
+  jointSalary: PersonAmounts
+  /** 共用の過不足 ＝ Σ出す額 − 支出合計（給料の入り先では変わらない） */
   jointNet: number
+}
+
+/**
+ * 共用の月間収支（通帳の動き。§6.2・S-20 の注記）。
+ *
+ * `balance` ＝ Σ手取り(共用に入る人) ＋ Σ(正の精算額) − 共用払い − Σ|負の精算額|
+ *           ＝ (Σ出す額 − 支出合計) ＋ Σ(手取り − 共用に入った給料)   ← 検算 V11
+ */
+export interface JointLedger {
+  /** 共用に入る給料の合計（Σ手取り。入り先が共用の人だけ） */
+  salaryIn: number
+  /** そのうち出す額に充てた分の合計（Σ共用に入った給料） */
+  salaryApplied: number
+  /** 給料の残り ＝ salaryIn − salaryApplied（S-20 の注記「うち 給料の残り ◯円」） */
+  salaryRemainder: number
+  /** 共用の過不足（出す額ベース。Σ出す額 − 支出合計） */
+  jointNet: number
+  /** 共用に残る額（通帳の動き） */
+  balance: number
+  /** その月に給料が共用に入る人がいる（DB の `has_salary_to_joint` と同じ出力。**S-20 の注記の条件ではない**。注記は `salaryRemainder > 0` のときだけ。04 §8.2） */
+  hasSalaryToJoint: boolean
 }
 
 /** 精算の見え方（S-20・S-22 で共通に使う。§6.2） */
@@ -292,8 +335,12 @@ export interface SettleModel {
   contrib: PersonAmountsOrNull
   net: PersonAmountsOrNull
   ratePct: PersonAmounts
+  /** その月の給料の入り先（決めた月は保存した値。§6.2） */
+  salaryToJoint: PersonFlags
   /** もう払った分 */
   adv: PersonAmounts
+  /** 共用に入った給料（S-22 の行）。decided でなければ 2人とも 0 */
+  jointSalary: PersonAmounts
   joint: number
   total: number
   /** 2人とも出す額が決まっている */
@@ -302,6 +349,8 @@ export interface SettleModel {
   settle: PersonAmounts | null
   /** 共用の過不足。decided でなければ null */
   jointNet: number | null
+  /** 共用の通帳の動き（S-20 の共用の行）。decided でなければ null */
+  jointLedger: JointLedger | null
   /** 済んだ分 */
   transferred: PersonAmounts
   /** 残り ＝ 動かす額 − 済んだ分 */
@@ -329,6 +378,8 @@ export type ConfirmBlock =
   | { reason: 'previous'; m: MonthKey }
   /** すでに精算中・精算済み（「9月はもう精算中です」） */
   | { reason: 'locked'; status: MonthStatus }
+  /** まだ来ていない月（DB の future_month。04 §8.2 settle_confirm） */
+  | { reason: 'future_month' }
 
 /* ------------------------------------------------------------------ *
  * 別名（docs/04_data_model.md §8.2 の RPC が使っている名前）

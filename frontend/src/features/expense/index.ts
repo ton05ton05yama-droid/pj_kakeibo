@@ -19,4 +19,3 @@ export {
 export { type DateGroup, groupByDate, pendingShownFor, sortByNewest, sortFixedRows } from './ordering'
 export * from './text'
 export { forgetExpenseMonth, useExpenseMonth } from './use-expense-month'
-export { useOnline } from './use-online'

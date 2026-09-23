@@ -4,6 +4,7 @@ import { PlainAppBar } from '@/components'
 import { useHousehold } from '@/data'
 import type { DefaultPayer, PersonKey } from '@/domain'
 import { isLockedStatus, monthOf, monthStatus } from '@/domain'
+import { useOnline } from '@/lib/use-online'
 import { AddToHomeSheet } from './add-to-home-sheet'
 import { FixedCostSheet } from './fixed-cost-sheet'
 import { FixedCostsPage } from './fixed-costs-page'
@@ -12,7 +13,6 @@ import { PersonSheet } from './person-sheet'
 import { SettingsScreen } from './settings-screen'
 import { editTemplateDraft, isDirty, newTemplateDraft, passwordDraft, personDraft, type SheetDraft } from './sheets'
 import { useAddToHome } from './use-add-to-home'
-import { useOnline } from './use-online'
 import { useSettingsActions } from './use-settings-actions'
 
 /**
@@ -146,6 +146,7 @@ export function SettingsTab() {
           draft={sheet}
           onDraft={setSheet}
           before={data.people[sheet.person]}
+          viewer={viewer}
           onClose={closeSheet}
           onDone={dropSheet}
           online={online}

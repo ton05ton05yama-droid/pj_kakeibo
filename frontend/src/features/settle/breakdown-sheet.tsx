@@ -5,7 +5,7 @@ import { categoryName } from '@/domain'
 import { FlowMark } from './components/flow-mark'
 import { pendingLabel } from './components/prep-list'
 import { monthDay, num, yen } from './format'
-import { checkLabel, flowVerb, NOTE } from './labels'
+import { checkLabel, flowVerb, JOINT_SALARY_LABEL, NOTE } from './labels'
 import { displayName, whoName } from './people'
 
 /** S-20 がカードを出す状態だけで開く（状態キーは S-20 のものをそのまま使う。§4 S-22） */
@@ -75,112 +75,123 @@ export function BreakdownSheet({ open, data, model, state, person, viewer, onClo
 
   return (
     <BottomSheet open={open} label={`${name}の内訳`} onClose={onClose}>
-      <Flex alignItems='center' gap={2} mt={1}>
-        <Avatar who={person} name={name} />
-        <Box flex='1' minW='0' fontSize='lg' fontWeight='semibold' lineHeight='ui'>
-          {displayName(data, person, viewer)}
-        </Box>
-        {estimate ? <Badge>見込み</Badge> : null}
-      </Flex>
-
-      <Divider />
-      <Row label='出す額' value={num(model.contrib[person] ?? 0)} />
-      {net !== null ? <Row label={`手取り ${num(net)} × ${model.ratePct[person]}%`} sub /> : null}
-      <Row label='もう払った分' value={`− ${num(model.adv[person])}`} />
-      {model.done[person].map((entry) => (
-        <Row
-          key={`${entry.at}-${entry.amount}`}
-          label={`済んだ分（${monthDay(entry.at)} ${checkLabel(entry.amount > 0)}）`}
-          value={`${entry.amount > 0 ? '−' : '＋'} ${num(entry.amount)}`}
-        />
-      ))}
-      <Divider />
-
-      {remaining === 0 ? (
-        <Box fontSize='lg' fontWeight='semibold' lineHeight='ui'>
-          {transferred !== 0 ? NOTE.done(transferred) : NOTE.noMove}
-        </Box>
-      ) : (
-        <>
-          <Flex alignItems='center' gap={2} fontSize='md' fontWeight='medium' color='text.sub'>
-            <FlowMark from={isIn ? person : 'joint'} to={isIn ? 'joint' : person} amount={remaining} data={data} />
-            <Box as='span'>{flowVerb(isIn)}</Box>
-          </Flex>
-          <Box
-            fontSize='display'
-            fontWeight='bold'
-            lineHeight='tight'
-            textAlign='right'
-            fontVariantNumeric='tabular-nums'
-            color={estimate ? 'text.sub' : undefined}
-          >
-            {transferred !== 0 ? (
-              <Box as='span' fontSize='lg' fontWeight='semibold' mr={1}>
-                あと
-              </Box>
-            ) : null}
-            {yen(remaining)}
+      {/* 状態キーは S-20 のものをそのまま使う（§4 S-22） */}
+      <Box data-screen='S-22' data-state={state}>
+        <Flex alignItems='center' gap={2} mt={1}>
+          <Avatar who={person} name={name} />
+          <Box flex='1' minW='0' fontSize='lg' fontWeight='semibold' lineHeight='ui'>
+            {displayName(data, person, viewer)}
           </Box>
-        </>
-      )}
+          {estimate ? <Badge>見込み</Badge> : null}
+        </Flex>
 
-      {/* 押した日と押した人（S-20 のボタンは「✓ 入れた」だけ。§4 S-22） */}
-      {(state === 'transfer' || state === 'settled') && check && remaining !== 0 ? (
-        <Box mt={1} fontSize='sm' color='text.muted'>
-          {`${checkLabel(isIn)}: ${monthDay(check.at)} ${whoName(data, check.by)}`}
-        </Box>
-      ) : null}
-
-      {estimate && pending.length > 0 ? (
-        <Box mt='6px' fontSize='sm' color='text.muted' lineHeight='ui'>
-          {`${pending.map((e) => pendingLabel(e)).join('・')}は金額待ちで入っていません`}
-        </Box>
-      ) : null}
-
-      <Box as='h3' mt={4} mb={1} fontSize='bodySm' fontWeight='semibold' color='text.sub'>
-        {`もう払った分（${rows.length}件）`}
-      </Box>
-      <Box>
-        {rows.map((e) => (
-          <Flex
-            key={e.id}
-            alignItems='center'
-            gap={3}
-            minH='tapMin'
-            py={1}
-            borderBottom='1px solid'
-            borderColor='border'
-            _last={{ borderBottom: 'none' }}
-          >
-            <Box flex='none' w='40px' fontSize='bodySm' color='text.sub' fontVariantNumeric='tabular-nums'>
-              {monthDay(e.date)}
-            </Box>
-            <Flex flex='1' minW='0' flexWrap='wrap' alignItems='baseline' columnGap={2}>
-              <Box fontSize='lg' fontWeight='medium' lineHeight='ui'>
-                {categoryName(e.cat)}
-              </Box>
-              <Box
-                fontSize='bodySm'
-                fontWeight='medium'
-                color='text.muted'
-                minW='0'
-                maxW='100%'
-                overflow='hidden'
-                textOverflow='ellipsis'
-                whiteSpace='nowrap'
-              >
-                {rowName(data, e)}
-              </Box>
-              {e.tpl ? <Badge>毎月</Badge> : null}
-            </Flex>
-            <Box fontSize='lg' fontWeight='semibold' fontVariantNumeric='tabular-nums' whiteSpace='nowrap'>
-              {num(e.amount ?? 0)}
-            </Box>
-          </Flex>
+        <Divider />
+        <Row label='出す額' value={num(model.contrib[person] ?? 0)} />
+        {net !== null ? <Row label={`手取り ${num(net)} × ${model.ratePct[person]}%`} sub /> : null}
+        <Row label='もう払った分' value={`− ${num(model.adv[person])}`} />
+        {/* 給料の入り先が共用の月だけ（出す額までしか充てない。§6.2・§6.3 ケースN）。
+            入る額が 0 の月は「− 0」を出さない（モックと同じ） */}
+        {model.jointSalary[person] > 0 ? (
+          <>
+            <Row label={JOINT_SALARY_LABEL} value={`− ${num(model.jointSalary[person])}`} />
+            {net !== null ? <Row label={NOTE.salaryCap(net)} sub /> : null}
+          </>
+        ) : null}
+        {model.done[person].map((entry) => (
+          <Row
+            key={`${entry.at}-${entry.amount}`}
+            label={`済んだ分（${monthDay(entry.at)} ${checkLabel(entry.amount > 0)}）`}
+            value={`${entry.amount > 0 ? '−' : '＋'} ${num(entry.amount)}`}
+          />
         ))}
-      </Box>
-      <Box my={2} fontSize='sm' color='text.muted'>
-        {NOTE.jointExcluded}
+        <Divider />
+
+        {remaining === 0 ? (
+          <Box fontSize='lg' fontWeight='semibold' lineHeight='ui'>
+            {transferred !== 0 ? NOTE.done(transferred) : NOTE.noMove}
+          </Box>
+        ) : (
+          <>
+            <Flex alignItems='center' gap={2} fontSize='md' fontWeight='medium' color='text.sub'>
+              <FlowMark from={isIn ? person : 'joint'} to={isIn ? 'joint' : person} amount={remaining} data={data} />
+              <Box as='span'>{flowVerb(isIn)}</Box>
+            </Flex>
+            <Box
+              fontSize='display'
+              fontWeight='bold'
+              lineHeight='tight'
+              textAlign='right'
+              fontVariantNumeric='tabular-nums'
+              color={estimate ? 'text.sub' : undefined}
+            >
+              {transferred !== 0 ? (
+                <Box as='span' fontSize='lg' fontWeight='semibold' mr={1}>
+                  あと
+                </Box>
+              ) : null}
+              {yen(remaining)}
+            </Box>
+          </>
+        )}
+
+        {/* 押した日と押した人（S-20 のボタンは「✓ 入れた」だけ。§4 S-22） */}
+        {(state === 'transfer' || state === 'settled') && check && remaining !== 0 ? (
+          <Box mt={1} fontSize='sm' color='text.muted'>
+            {`${checkLabel(isIn)}: ${monthDay(check.at)} ${whoName(data, check.by)}`}
+          </Box>
+        ) : null}
+
+        {estimate && pending.length > 0 ? (
+          <Box mt='6px' fontSize='sm' color='text.muted' lineHeight='ui'>
+            {`${pending.map((e) => pendingLabel(e)).join('・')}は金額待ちで入っていません`}
+          </Box>
+        ) : null}
+
+        <Box as='h3' mt={4} mb={1} fontSize='bodySm' fontWeight='semibold' color='text.sub'>
+          {`もう払った分（${rows.length}件）`}
+        </Box>
+        <Box>
+          {rows.map((e) => (
+            <Flex
+              key={e.id}
+              alignItems='center'
+              gap={3}
+              minH='tapMin'
+              py={1}
+              borderBottom='1px solid'
+              borderColor='border'
+              _last={{ borderBottom: 'none' }}
+            >
+              <Box flex='none' w='40px' fontSize='bodySm' color='text.sub' fontVariantNumeric='tabular-nums'>
+                {monthDay(e.date)}
+              </Box>
+              <Flex flex='1' minW='0' flexWrap='wrap' alignItems='baseline' columnGap={2}>
+                <Box fontSize='lg' fontWeight='medium' lineHeight='ui'>
+                  {categoryName(e.cat)}
+                </Box>
+                <Box
+                  fontSize='bodySm'
+                  fontWeight='medium'
+                  color='text.muted'
+                  minW='0'
+                  maxW='100%'
+                  overflow='hidden'
+                  textOverflow='ellipsis'
+                  whiteSpace='nowrap'
+                >
+                  {rowName(data, e)}
+                </Box>
+                {e.tpl ? <Badge>毎月</Badge> : null}
+              </Flex>
+              <Box fontSize='lg' fontWeight='semibold' fontVariantNumeric='tabular-nums' whiteSpace='nowrap'>
+                {num(e.amount ?? 0)}
+              </Box>
+            </Flex>
+          ))}
+        </Box>
+        <Box my={2} fontSize='sm' color='text.muted'>
+          {NOTE.jointExcluded}
+        </Box>
       </Box>
     </BottomSheet>
   )

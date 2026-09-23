@@ -1,6 +1,6 @@
 # セットアップ手順（Supabase を作ってからやること）
 
-- 版: 1.0（2026-09-23）
+- 版: 1.2（2026-09-23。**出す額を決め直したときの給料の入り先**〈仕様書 §12.1 Q27〉のためのマイグレーション `0009_salary_redecide.sql` を手順2に足した。1.1 は同日、**給料の入り先**〈仕様書 §12.1 Q25〉と**出す割合を本人だけ**〈Q26〉のためのマイグレーション `0008_salary_to_joint.sql` を手順2に足し、**もう本番に流したあとから足すとき**の手順を §11 に書いたもの）
 - 位置づけ: **まさと本人が手を動かすための手順書**。何を決めるかの正本は `docs/05_platform.md`（以下「05」）、データの正本は `docs/04_data_model.md`（以下「04」）、画面の正本は `docs/03_ui_spec.md`（以下「仕様書」）。この文書はそれらを「上から順にやる形」に並べ直したもので、決め事を新しく作らない。
 - 前提: この Mac に Node 24 / pnpm 11 / Docker が入っている。GitHub は個人アカウント `ton05ton05yama-droid`（CLAUDE.md §4）。
 - **まだ決まっていないこと**: 擬似メールのドメイン（05 §9）。手順2の前に決める。
@@ -51,8 +51,12 @@
 | 5 | `supabase/migrations/0005_rpc.sql` | RPC（04 §8.3） |
 | 6 | `supabase/migrations/0006_rpc_month_summary.sql` | `month_summary`（04 §8.2 の形） |
 | 7 | `supabase/migrations/0007_seed_categories.sql` | カテゴリ15件（04 §10・仕様書 §8） |
+| 8 | `supabase/migrations/0008_salary_to_joint.sql` | **給料の入り先**（`household_members.salary_to_joint`・`month_contributions.salary_to_joint`）と、**出す割合・給料の入り先を本人だけ**にする RPC（`update_contribution_rate`・`update_salary_to_joint`）、新しい計算式の `private.month_live`・`decide_contributions`・`update_member`・`month_summary`（04 §2.2・§2.6・§6・§8。仕様書 §12.1 Q25・Q26） |
+| 9 | `supabase/migrations/0009_salary_redecide.sql` | **出す額を決め直したときの給料の入り先**（`decide_contributions` を `create or replace`。決め直しで `salary_to_joint` を `household_members` のいまの値で上書きし、元に戻すための控えにも入れる。`contribution_rate` は保存値のまま。04 §2.6・§8.3。仕様書 §12.1 Q27） |
 
 エラーが出たら、**そのファイルの途中で止まっている**。直してから次に進む（前のファイルを流し直す必要はない。どれも `create or replace` か `create table`）。
+
+**もう 0001〜0007 を流してある場合**（2026-09-23 に足した分。仕様書 §12.1 Q25・Q26）: **0008 と 0009 を順に流す**。0001〜0007 は書き換えないし、流し直さない（04 §11）。**0008 まで流してある場合は 0009 だけ**（仕様書 §12.1 Q27。`decide_contributions` の `create or replace` だけで、テーブル・列・RLS は変えない）。0008 は `add column if not exists` と `create or replace` だけなので、**何度流しても同じ結果**になる（0009 も同じ）。列には既定（`false` ＝ 「自分の口座」）があるので、**いまある2人の行とこれまでの月の出す額はそのまま「自分の口座」**になり、**8月・9月の精算額は1円も変わらない**（仕様書 §9.1）。
 
 ### (b) psql（何度もやるならこちら）
 
@@ -77,6 +81,26 @@ SQL エディタで:
 select count(*) from public.categories;                     -- → 15
 select count(*) from pg_policies where schemaname = 'public';  -- → 19
 select public.ping();                                       -- → 1
+```
+
+0008 まで流したら、続けて（04 §2.2・§2.6）:
+
+```sql
+-- 足した列（どちらも既定は false = 自分の口座）
+select column_name, data_type, column_default
+  from information_schema.columns
+ where table_schema = 'public'
+   and table_name in ('household_members', 'month_contributions')
+   and column_name = 'salary_to_joint';          -- → 2行・boolean・false
+
+-- 本人だけの RPC が3つそろっているか
+select proname from pg_proc
+ where pronamespace = 'public'::regnamespace
+   and proname in ('update_contribution_rate', 'update_salary_to_joint', 'update_default_payer');  -- → 3行
+
+-- いまある人と月が、ぜんぶ「自分の口座」になっているか
+select count(*) filter (where salary_to_joint) from public.household_members;    -- → 0
+select count(*) filter (where salary_to_joint) from public.month_contributions;  -- → 0
 ```
 
 ---
@@ -116,8 +140,9 @@ insert into public.household_members
 insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 ```
 
-- 呼び名・色・出す割合は、あとからアプリの設定（S-33）で2人とも変えられる。
+- 呼び名と色は、あとからアプリの設定（S-33）で**2人とも**変えられる。**出す割合は本人だけ**（相手の行では読み取り専用。仕様書 §12.1 Q26）。
 - 「記録の払った人」（`default_payer`）はここでは書かない。既定は「自分」で、本人が S-30 で変える（04 §10）。
+- **「給料の入り先」（`salary_to_joint`）もここでは書かない**。既定は「自分の口座」（`false`）で、**本人だけ**が S-33 で変える（仕様書 S-33・§12.1 Q25。0008 を流したあとに出る行）。共用口座にすると、その人の手取りのうち出す額までが共用に入っているものとして精算額から引かれ、超えた分は共用に残る（仕様書 §6.2・§6.3 ケースN）。
 - 確かめ: `select * from public.household_members;` が2行。
 
 ---
@@ -232,4 +257,5 @@ unset SUPABASE_SECRET_KEY
    ```
 
    Docker で Supabase の Postgres を起動し、全マイグレーションを流して、仕様書 §9 の見本データで §9.6 の金額・§2.2 の権限・RPC の戻り値を確かめる（141件）。終わるとコンテナは消える（`KEEP=1` を付けると残る）。
-4. 通ったら、手順2 の (a) か (b) で本番に流す。
+4. 通ったら、手順2 の (a) か (b) で本番に流す。**足したファイルだけ**を流せばよい（例: 2026-09-23 の `0008_salary_to_joint.sql`・`0009_salary_redecide.sql`）。
+5. 流したあと、手順2 の「流したあとの確かめ」を実行する。**列を足したマイグレーションでは、いまある行に既定が入っていることも確かめる**（0008 なら `salary_to_joint` が 2人とも `false`）。

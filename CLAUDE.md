@@ -1,6 +1,6 @@
 # pj_kakeibo — このリポジトリで作業するときのルール
 
-まさととパートナーの2人で使う家計簿アプリ（スマホ専用）。いまは**設計・モック段階で、実装はこれから**（2026-09-22）。
+まさととりさこの2人で使う家計簿アプリ（スマホ専用）。設計とモックがそろい、**実装（`frontend/` と `supabase/migrations/`）を進めている段階**（2026-09-23）。
 概要と文書の一覧は `README.md`。
 
 ---
@@ -11,7 +11,7 @@
 |---|---|---|
 | UI（画面ID・状態・文言・見た目・見本データ） | `docs/03_ui_spec.md` ＋ `mock/index.html`（**2つで1つの正本**） | モックの公開版（Artifact） |
 | お金の計算（月の状態・精算の式・やり直し・同時操作） | 仕様書 §4.0.2・§6（決まり） | `docs/02_settlement.md`（実装の詳細）・仕様書 §9.6 |
-| データ（テーブル・RLS・RPC） | `docs/04_data_model.md` | `supabase/migrations/`（できたら） |
+| データ（テーブル・RLS・RPC） | `docs/04_data_model.md` | `supabase/migrations/`（**すでに本番に流したファイルは書き換えず、新しい番号のファイルを足す**。04 §11・06 §11。例: 2026-09-23 の `0008_salary_to_joint.sql`・`0009_salary_redecide.sql`） |
 | 基盤・運用（Supabase・Vercel・iOS・Git） | `docs/05_platform.md` | — |
 | 要件・スコープ | `docs/01_requirements.md` | — |
 | 調査の根拠 | `docs/research/*.md` | 更新しない（冒頭の注記を除く）。調査時点の記録。`platform.md` §7.1 は Git の設定を変える前の状態で、今の状態は 05 §7。reference-ui.md の色・面の組み方・テーマについての記述（§0 の要約、§1.6、§2 のページ #fafafa・影・セグメントの選択中・背景幕のダーク、§3 のダークの対応表、§4 の識別色、§5 の CSS 変数と theme-color）は、色合わせ（2026-09-22）の前のもの。値は写さず、仕様書 §3.9・§7 を使う |

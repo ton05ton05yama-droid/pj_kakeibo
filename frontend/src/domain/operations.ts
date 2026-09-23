@@ -179,7 +179,8 @@ export function ensureMonth(
 /**
  * 出す額を決める（S-21［決める］・S-20［この額で決める］。04 §8.3 の decide_contributions と同じ形）。
  * 渡された人の行だけを作って返す（d は変えない。保存は saveContributions で行う）。
- * 割合は、その月に保存した値があればそれ、無ければ人の設定の割合（§6.2）。
+ * 割合は取り決めなので、その月に保存した値があればそれ、無ければ人の設定の割合（§6.2）。
+ * 給料の入り先はその月の事実なので、決め直すといつも今の設定を取り込む（2026-09-23 の決定）。
  */
 export function decideContributions(
   d: HouseholdData,
@@ -194,7 +195,14 @@ export function decideContributions(
     if (net == null) continue
     assertNet(net)
     const ratePct = rateFor(d, m, p)
-    out[p] = { net, ratePct, amount: contributionOf(net, ratePct), by, at }
+    out[p] = {
+      net,
+      ratePct,
+      salaryToJoint: d.people[p].salaryToJoint,
+      amount: contributionOf(net, ratePct),
+      by,
+      at,
+    }
   }
   return out
 }
@@ -244,7 +252,9 @@ export function confirmMonth(d: HouseholdData, m: MonthKey, by: PersonKey, at: D
     contrib: { a: md.contrib.a, b: md.contrib.b },
     net: { ...md.net },
     ratePct: { ...md.ratePct },
+    salaryToJoint: { ...md.salaryToJoint },
     adv: { ...md.adv },
+    jointSalary: { ...md.jointSalary },
     joint: md.joint,
     total: md.total,
     settle: { ...md.settle },
@@ -313,7 +323,9 @@ export function reopenMonth(d: HouseholdData, m: MonthKey, by: PersonKey, at: Da
     const c = rec.checks[p]
     if (c && md.remaining && md.remaining[p] !== 0) {
       rec.transferred[p] += md.remaining[p]
-      rec.done[p].push({ amount: md.remaining[p], at: c.at, by: c.by })
+      // 回（round）も持たせる（DB の settlement_checks.round と同じ）。
+      // やり直しの元に戻すが「このやり直しで移した分」だけを戻すために要る
+      rec.done[p].push({ amount: md.remaining[p], at: c.at, by: c.by, round: rec.round })
     }
   }
   rec.reopenedFrom = rec.status === 'settled' ? 'settled' : 'confirmed'

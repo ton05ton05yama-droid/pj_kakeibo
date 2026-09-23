@@ -3,7 +3,8 @@
  * 行の形は docs/04_data_model.md §2 の列の定義に合わせたダミー（Supabase はまだ無い）。
  */
 import { describe, expect, it } from 'vitest'
-import type { MonthContributions } from '../../domain'
+import type { HouseholdData, MonthContributions } from '../../domain'
+import { settleModel } from '../../domain'
 import {
   buildPersonMap,
   type ExpenseRow,
@@ -38,6 +39,7 @@ const MEMBER_ROWS: HouseholdMemberRow[] = [
     display_name: 'まさと',
     color: 'teal',
     contribution_rate: 40,
+    salary_to_joint: false,
     default_payer: 'self',
   },
   {
@@ -47,6 +49,7 @@ const MEMBER_ROWS: HouseholdMemberRow[] = [
     display_name: 'りさこ',
     color: 'amber',
     contribution_rate: 40,
+    salary_to_joint: false,
     default_payer: 'self',
   },
 ]
@@ -98,6 +101,7 @@ describe('家計・人・ひな形', () => {
       name: 'りさこ',
       color: 'b',
       ratePct: 40,
+      salaryToJoint: false,
       defaultPayer: 'self',
       lastSeen: '2026-09-21T21:00',
     })
@@ -235,6 +239,7 @@ describe('出す額', () => {
         user_id: UID_A,
         net_income: 300000,
         contribution_rate: 40,
+        salary_to_joint: false,
         contribution: 120000,
         decided_by: UID_A,
         decided_at: '2026-09-01T21:00:00+09:00',
@@ -244,6 +249,7 @@ describe('出す額', () => {
         user_id: UID_B,
         net_income: 220000,
         contribution_rate: 40,
+        salary_to_joint: false,
         contribution: 88000,
         decided_by: UID_B,
         decided_at: '2026-09-03T08:15:00+09:00',
@@ -253,6 +259,7 @@ describe('出す額', () => {
         user_id: '33333333-3333-4333-8333-333333333333',
         net_income: 1,
         contribution_rate: 40,
+        salary_to_joint: false,
         contribution: 0,
         decided_by: UID_A,
         decided_at: '2026-10-01T21:00:00+09:00',
@@ -261,8 +268,8 @@ describe('出す額', () => {
     const out = toContributions(rows, persons)
     expect(Object.keys(out)).toEqual(['2026-09'])
     expect(out['2026-09']).toEqual({
-      a: { net: 300000, ratePct: 40, amount: 120000, by: 'a', at: '2026-09-01T21:00' },
-      b: { net: 220000, ratePct: 40, amount: 88000, by: 'b', at: '2026-09-03T08:15' },
+      a: { net: 300000, ratePct: 40, salaryToJoint: false, amount: 120000, by: 'a', at: '2026-09-01T21:00' },
+      b: { net: 220000, ratePct: 40, salaryToJoint: false, amount: 88000, by: 'b', at: '2026-09-03T08:15' },
     })
   })
 })
@@ -270,8 +277,8 @@ describe('出す額', () => {
 describe('月の精算', () => {
   const contributions: Record<string, MonthContributions> = {
     '2026-09': {
-      a: { net: 300000, ratePct: 40, amount: 120000, by: 'a', at: '2026-09-01T21:00' },
-      b: { net: 220000, ratePct: 40, amount: 88000, by: 'b', at: '2026-09-03T08:15' },
+      a: { net: 300000, ratePct: 40, salaryToJoint: false, amount: 120000, by: 'a', at: '2026-09-01T21:00' },
+      b: { net: 220000, ratePct: 40, salaryToJoint: false, amount: 88000, by: 'b', at: '2026-09-03T08:15' },
     },
   }
 
@@ -349,18 +356,97 @@ describe('月の精算', () => {
     expect(rec.status).toBe('confirmed')
     expect(rec.round).toBe(2)
     expect(rec.transferred).toEqual({ a: 0, b: 0 })
-    expect(rec.done.a).toEqual([{ amount: 1000, at: '2026-10-01T21:10', by: 'a' }])
+    expect(rec.done.a).toEqual([{ amount: 1000, at: '2026-10-01T21:10', by: 'a', round: 1 }])
     expect(rec.checks).toEqual({ b: { by: 'b', at: '2026-10-02T12:30', amount: 65930 } })
     expect(rec.snapshot).toEqual({
       contrib: { a: 120000, b: 88000 },
       net: { a: 300000, b: 220000 },
       ratePct: { a: 40, b: 40 },
+      salaryToJoint: { a: false, b: false },
       adv: { a: 37510, b: 22070 },
+      jointSalary: { a: 0, b: 0 },
       joint: 146550,
       total: 206130,
       settle: { a: 82490, b: 65930 },
       jointNet: 1870,
     })
+  })
+
+  it('給料が共用に入る月は、保存した行のまま 共用に入った給料 と 精算額 を写す（§6.3 ケースN）', () => {
+    // DB の行（りさこの給料は共用に入る月。0008_salary_to_joint.sql の式で保存されたもの）
+    const rows: MonthContributionRow[] = [
+      {
+        month: '2026-09-01',
+        user_id: UID_A,
+        net_income: 300000,
+        contribution_rate: 40,
+        salary_to_joint: false,
+        contribution: 120000,
+        decided_by: UID_A,
+        decided_at: '2026-09-01T21:00:00+09:00',
+      },
+      {
+        month: '2026-09-01',
+        user_id: UID_B,
+        net_income: 220000,
+        contribution_rate: 40,
+        salary_to_joint: true,
+        contribution: 88000,
+        decided_by: UID_B,
+        decided_at: '2026-09-03T08:15:00+09:00',
+      },
+    ]
+    // month_settlement_lines も DB の新しい式（精算額 ＝ 出す額 − 立替 − 共用に入った給料）で入っている
+    const caseNLines: MonthSettlementLineRow[] = [
+      {
+        month: '2026-09-01',
+        user_id: UID_A,
+        contribution: 120000,
+        advance: 37510,
+        settlement: 82490,
+        transferred: 0,
+        remaining: 82490,
+      },
+      {
+        month: '2026-09-01',
+        user_id: UID_B,
+        contribution: 88000,
+        advance: 22070,
+        settlement: -22070,
+        transferred: 0,
+        remaining: -22070,
+      },
+    ]
+    const caseN = toContributions(rows, persons)
+    const out = toSettlements([settlementRow], caseNLines, [], caseN, persons)
+    const rec = out['2026-09']
+    expect(rec).toBeDefined()
+    if (!rec) return
+    expect(rec.snapshot?.salaryToJoint).toEqual({ a: false, b: true })
+    expect(rec.snapshot?.jointSalary).toEqual({ a: 0, b: 88000 })
+    // 保存値そのまま（りさこは共用から 22,070 受け取る）
+    expect(rec.snapshot?.settle).toEqual({ a: 82490, b: -22070 })
+
+    // 同じ snapshot から作った画面の数字も、DB の保存値と一致する（端末と DB の式が同じ）
+    const data: HouseholdData = {
+      household: toHousehold({ id: 'h1', name: 'かけいぼ', start_month: '2026-08-01' }, 'kakeibo.invalid'),
+      people: {
+        a: toPerson(MEMBER_ROWS[0] as HouseholdMemberRow, 'masato', null),
+        b: toPerson({ ...(MEMBER_ROWS[1] as HouseholdMemberRow), salary_to_joint: true }, 'risako', null),
+      },
+      templates: [],
+      contributions: caseN,
+      expenses: [],
+      settlements: out,
+    }
+    const md = settleModel(data, '2026-09', '2026-10-02T09:00')
+    expect(md.jointSalary).toEqual({ a: 0, b: 88000 })
+    expect(md.settle).toEqual(rec.snapshot?.settle)
+    expect(md.settle).toEqual({ a: 82490, b: -22070 })
+    // 共用に残る額（§6.3 ケースN。検算 V11: 133,870 ＝ 1,870 ＋ 132,000）
+    expect(md.jointNet).toBe(1870)
+    expect(md.jointLedger?.balance).toBe(133870)
+    expect(md.jointLedger?.salaryRemainder).toBe(132000)
   })
 
   it('やり直し中は行を使わず、すべての回のチェックの合計を済んだ分にする（D7）', () => {
@@ -413,10 +499,10 @@ describe('月の精算', () => {
     expect(rec.transferred).toEqual({ a: 1500, b: -2000 })
     expect(rec.checks).toEqual({})
     expect(rec.done.a).toEqual([
-      { amount: 1000, at: '2026-10-01T21:10', by: 'a' },
-      { amount: 500, at: '2026-10-02T09:10', by: 'b' },
+      { amount: 1000, at: '2026-10-01T21:10', by: 'a', round: 1 },
+      { amount: 500, at: '2026-10-02T09:10', by: 'b', round: 2 },
     ])
-    expect(rec.done.b).toEqual([{ amount: -2000, at: '2026-10-03T12:30', by: 'b' }])
+    expect(rec.done.b).toEqual([{ amount: -2000, at: '2026-10-03T12:30', by: 'b', round: 3 }])
     // やり直し中は確定した値を持たない（画面はいまの数字で出す）
     expect(rec.snapshot).toBeNull()
   })
