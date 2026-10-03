@@ -32,6 +32,7 @@ import {
   setCheck as domainSetCheck,
   ensureMonth,
   findExpense,
+  firstUnmadeMonth,
   isLockedStatus,
   monthOf,
   monthStatus,
@@ -66,13 +67,35 @@ function elapsedMs(from: DateTimeKey, to: DateTimeKey): number {
   return new Date(to).getTime() - new Date(from).getTime()
 }
 
-/** ひな形の値（履歴の before・after。DB の private.template_values と同じ項目） */
+/** ひな形の値（履歴の before・after。DB の private.template_values と同じ項目。0011 から開始月も） */
 function templateValuesOf(t: FixedCostTemplate): TemplateValues {
-  return { name: t.name, cat: t.cat, payer: t.payer, kind: t.kind, amount: t.amount }
+  return { name: t.name, cat: t.cat, payer: t.payer, kind: t.kind, amount: t.amount, from: t.from }
 }
 
+/** 名前・カテゴリ・払う人・金額の種類・金額が同じか（開始月は見ない） */
 function sameValues(x: TemplateValues, y: TemplateValues): boolean {
   return x.name === y.name && x.cat === y.cat && x.payer === y.payer && x.kind === y.kind && x.amount === y.amount
+}
+
+/**
+ * 手つかずの行（0011 の update_template と同じ）: 来月に回していない（帰属月 ＝ 対象月）・
+ * 金額を入れた人がいない・直されていない・今月はなしでない
+ */
+function isUntouched(e: Expense): boolean {
+  return e.month === e.labelMonth && e.amountBy === null && e.editedAt === null && !e.skipped
+}
+
+/** 行がひな形の値と同じか（名前・カテゴリ・払う人・金額〈毎月同じのとき〉） */
+function rowHasValues(e: Expense, v: TemplateValues): boolean {
+  return e.memo === v.name && e.cat === v.cat && e.payer === v.payer && (v.kind !== 'fixed' || e.amount === v.amount)
+}
+
+/** ひな形の値を行に写す（名前・カテゴリ・払う人・金額〈毎月同じのとき〉） */
+function applyValues(e: Expense, v: TemplateValues): void {
+  e.memo = v.name
+  e.cat = v.cat
+  e.payer = v.payer
+  if (v.kind === 'fixed') e.amount = v.amount
 }
 
 /** 履歴が無ければ、ひな形から「追加」を作る（見本データ〈§9〉は履歴を持たない。DB の 0010 と同じ入れ方） */
@@ -541,52 +564,102 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
       for (const m of monthsBetween(from, current)) ensureMonth(state.data, m, state.now)
     },
 
-    async updateTemplate(id, input) {
+    async updateTemplate(id, input, from) {
       const viewer = requireSignedIn()
       const t = state.data.templates.find((x) => x.id === id)
       if (!t) throw new RepositoryError('unknown', 'ひな形が見つかりません')
-      const before = templateValuesOf(t)
-      t.name = input.name
-      t.cat = input.cat
-      t.payer = input.payer
-      t.kind = input.kind
-      t.amount = input.amount
-      const after = templateValuesOf(t)
-      if (sameValues(before, after)) return
-      // 履歴（DB の templates_after_write と同じ決まり）
-      const changes = seedTemplateChanges(state.data)
-      const last = latestChange(changes, id)
-      const since = last === undefined ? Number.NaN : elapsedMs(last.at, state.now)
-      if (
-        last !== undefined &&
-        last.change === 'update' &&
-        last.by === viewer &&
-        Number.isFinite(since) &&
-        since <= 60_000 &&
-        last.before !== null &&
-        last.after !== null &&
-        sameValues(last.before, after) &&
-        sameValues(last.after, before)
-      ) {
-        // ちょうど逆向きの変更＝元に戻した。新しい履歴は足さずに、直前の履歴を消す
-        state.data.templateChanges = changes.filter((c) => c !== last)
-        return
+      const current = monthOf(state.now)
+      // 何月分から変えるか: 省略・家計を作った月より前・既定より後は既定（0011 の update_template と同じ）
+      const fallback = firstUnmadeMonth(state.data, t)
+      let m = from ?? fallback
+      if (m < state.data.household.createdMonth || m > fallback) m = fallback
+      // 前の月から変えるときは、その月から今月までに精算中・精算済みの月が無いこと（一番新しいロック中の月を返す）
+      if (m < fallback) {
+        const locked = monthsBetween(m, current).filter((x) => isLockedStatus(monthStatus(state.data, x, state.now)))
+        const newest = locked.at(-1)
+        if (newest !== undefined) throw new RepositoryError('month_locked', 'その月は精算中です', newest)
       }
-      // 何月分から効くか: まだ作っていない最初の月（そのひな形の行の最後の対象月の翌月。行が無ければ開始月）
-      const months = state.data.expenses
-        .filter((e) => e.tpl === id && e.labelMonth !== null)
-        .map((e) => e.labelMonth as MonthKey)
-      const lastMonth = months.length === 0 ? null : months.reduce((x, y) => (x > y ? x : y))
-      changes.push({
+      const before = templateValuesOf(t)
+      // 金額の種類は変えない。金額は毎月同じのときだけ使う
+      const after: TemplateValues = {
+        name: input.name,
+        cat: input.cat,
+        payer: input.payer,
+        kind: t.kind,
+        amount: t.kind === 'fixed' ? input.amount : null,
+        // 開始月より前の月を選んだら、開始月を広げる
+        from: m < t.from ? m : t.from,
+      }
+      // 値も開始月も変わらなければ何もしない（履歴も足さない）
+      if (sameValues(before, after) && before.from === after.from) return null
+      t.name = after.name
+      t.cat = after.cat
+      t.payer = after.payer
+      t.amount = after.amount
+      t.from = after.from ?? t.from
+      // 選んだ月以降の、手つかずで、ロックされていない月の行を新しい値に書き換える
+      // （S-14 で個別に直した行・来月に回した行・精算中や精算済みの月の行はそのまま）
+      for (const e of state.data.expenses) {
+        if (e.tpl !== id || e.labelMonth === null || e.labelMonth < m || !isUntouched(e)) continue
+        if (isLockedStatus(monthStatus(state.data, e.month, state.now))) continue
+        applyValues(e, after)
+      }
+      // 開始月を広げたら、その月から今月までの行をすぐ作る（ロック中の月には作らない）
+      if (t.from < (before.from ?? t.from)) {
+        for (const x of monthsBetween(t.from, current)) ensureMonth(state.data, x, state.now)
+      }
+      const change: TemplateChange = {
         id: nextChangeId(),
         templateId: id,
         change: 'update',
-        from: lastMonth === null ? t.from : addMonth(lastMonth, 1),
+        from: m,
         before,
-        after,
+        after: templateValuesOf(t),
         by: viewer,
         at: state.now,
-      })
+      }
+      seedTemplateChanges(state.data).push(change)
+      return change.id
+    },
+
+    async undoTemplateChange(changeId) {
+      const viewer = requireSignedIn()
+      const changes = seedTemplateChanges(state.data)
+      const c = changes.find((x) => x.id === changeId)
+      const t = c === undefined ? undefined : state.data.templates.find((x) => x.id === c.templateId)
+      if (c === undefined || c.change !== 'update' || c.before === null || c.after === null || t === undefined) {
+        return blocked('not_found', {})
+      }
+      // その変更をした人が1分以内で、それがそのひな形の一番新しい履歴のときだけ（0011 の undo_update_template）
+      const since = elapsedMs(c.at, state.now)
+      if (c.by !== viewer || !Number.isFinite(since) || since > 60_000 || latestChange(changes, t.id) !== c) {
+        return blocked('too_late', {})
+      }
+      const before = c.before
+      const after = c.after
+      const start = before.from ?? t.from
+      const locked = (e: Expense): boolean => isLockedStatus(monthStatus(state.data, e.month, state.now))
+      const rows = state.data.expenses.filter((e) => e.tpl === t.id && e.labelMonth !== null && isUntouched(e))
+      // その変更で作った行（戻した開始月より前で、手つかずのもの）は消す
+      const made = rows.filter((e) => (e.labelMonth as MonthKey) < start)
+      // その変更で書き換えた行（選んだ月以降で、手つかずのもの）は前の値に戻す
+      const rewritten = rows.filter((e) => (e.labelMonth as MonthKey) >= c.from && (e.labelMonth as MonthKey) >= start)
+      // ロック中の月の行には触れない（触れる必要があれば止める）
+      if (made.some(locked) || rewritten.some((e) => locked(e) && rowHasValues(e, after) && !rowHasValues(e, before))) {
+        return blocked('locked', {})
+      }
+      const drop = new Set(made.map((e) => e.id))
+      state.data.expenses = state.data.expenses.filter((e) => !drop.has(e.id))
+      for (const e of rewritten) {
+        if (!locked(e)) applyValues(e, before)
+      }
+      t.name = before.name
+      t.cat = before.cat
+      t.payer = before.payer
+      t.amount = before.amount
+      t.from = start
+      state.data.templateChanges = changes.filter((x) => x !== c)
+      return ok(null)
     },
 
     async stopTemplate(id, undo = false) {
@@ -604,11 +677,7 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
         return ok({ until: null })
       }
       const wasRunning = t.until === null
-      const months = state.data.expenses
-        .filter((e) => e.tpl === id && e.labelMonth !== null)
-        .map((e) => e.labelMonth as MonthKey)
-      const last = months.length === 0 ? null : months.reduce((x, y) => (x > y ? x : y))
-      t.until = last === null ? t.from : addMonth(last, 1)
+      t.until = firstUnmadeMonth(state.data, t)
       if (wasRunning) {
         changes.push({
           id: nextChangeId(),

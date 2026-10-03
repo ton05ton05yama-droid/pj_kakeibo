@@ -6,6 +6,7 @@ import {
   useDeleteTemplate,
   useSignOut,
   useStopTemplate,
+  useUndoTemplateChange,
   useUpdateContributionRate,
   useUpdateDefaultPayer,
   useUpdatePassword,
@@ -13,7 +14,7 @@ import {
   useUpdateSalaryToJoint,
   useUpdateTemplate,
 } from '@/data'
-import type { DefaultPayer, Person, PersonKey } from '@/domain'
+import type { DefaultPayer, MonthKey, Person, PersonKey } from '@/domain'
 import { monthLabel } from './sheets'
 
 /** 給料の入り先（S-33）。'joint' = 共用口座、'self' = 自分の口座 */
@@ -48,8 +49,11 @@ export interface SettingsActions {
   savePerson: (person: PersonKey, values: PersonValues, before: Person) => Promise<void>
   /** 毎月の支払いを足す（S-32） */
   addTemplate: (input: TemplateInput) => Promise<void>
-  /** 毎月の支払いを直す（S-32）。変更はまだ作っていない月から効く（§6.5） */
-  updateTemplate: (id: string, input: TemplateInput, before: TemplateInput) => Promise<void>
+  /**
+   * 毎月の支払いを直す（S-32）。`from` の月から効かせる（その月以降の手つかずの行も書き換える）。
+   * その月から今月までに精算中・精算済みの月があれば RepositoryError('month_locked') を投げる
+   */
+  updateTemplate: (id: string, input: TemplateInput, from: MonthKey) => Promise<void>
   /** 支払いをやめる（S-32） */
   stopTemplate: (id: string, name: string) => Promise<void>
   /** パスワードを変える（S-34。元に戻すは無し） */
@@ -72,6 +76,7 @@ export function useSettingsActions(snapshot: Snapshot | undefined): SettingsActi
   const addTemplateM = useAddTemplate()
   const updateTemplateM = useUpdateTemplate()
   const stopTemplateM = useStopTemplate()
+  const undoTemplateChangeM = useUndoTemplateChange()
   const deleteTemplateM = useDeleteTemplate()
   const updatePassword = useUpdatePassword()
   const signOutM = useSignOut()
@@ -128,13 +133,18 @@ export function useSettingsActions(snapshot: Snapshot | undefined): SettingsActi
       })
     },
 
-    async updateTemplate(id, input, before) {
-      await updateTemplateM.mutateAsync({ id, input })
+    async updateTemplate(id, input, from) {
+      const changeId = await updateTemplateM.mutateAsync({ id, input, from })
+      // 元に戻すは、足した履歴の ID で戻す（前の値・開始月・書き換えた行も戻り、履歴は消える）
       toast.show({
         text: '保存しました',
-        onUndo: () => {
-          void updateTemplateM.mutateAsync({ id, input: before })
-        },
+        ...(changeId === null
+          ? {}
+          : {
+              onUndo: () => {
+                void undoTemplateChangeM.mutateAsync({ changeId })
+              },
+            }),
       })
     },
 

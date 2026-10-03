@@ -314,6 +314,56 @@ describe('Supabase 実装: 毎月の支払いの開始月と変更の履歴（00
   })
 })
 
+describe('Supabase 実装: 直すときの「何月分から」（0011 の update_template・undo_update_template）', () => {
+  const WIFI = { name: 'Wi-Fi', cat: 'telecom', payer: 'joint', kind: 'fixed', amount: 4980 } as const
+
+  it('update_template に値と月の1日を送り、足した履歴の ID を返す', async () => {
+    const { repository, calls } = await loaded({
+      rpc: (name) =>
+        name === 'update_template' ? { result: 'ok', from_month: '2026-09-01', rows: 1, change_id: 'c9' } : {},
+    })
+    expect(await repository.updateTemplate('tpl1', WIFI, '2026-09')).toBe('c9')
+    expect(calls.rpc.filter((c) => c.name === 'update_template').at(-1)?.args).toEqual({
+      p_template_id: 'tpl1',
+      p_name: 'Wi-Fi',
+      p_category_id: 'telecom',
+      p_paid_by: null,
+      p_amount: 4980,
+      p_from_month: '2026-09-01',
+    })
+  })
+
+  it('月を渡さないときは null（DB が既定の月にする）。金額待ちは金額を送らない。変わらなければ null を返す', async () => {
+    const { repository, calls } = await loaded({
+      rpc: (name) => (name === 'update_template' ? { result: 'ok', rows: 0 } : {}),
+    })
+    expect(await repository.updateTemplate('tpl1', { ...WIFI, kind: 'variable', amount: null })).toBeNull()
+    expect(calls.rpc.filter((c) => c.name === 'update_template').at(-1)?.args).toMatchObject({
+      p_amount: null,
+      p_from_month: null,
+    })
+  })
+
+  it('blocked locked は、追加のときと同じ month_locked（detail は YYYY-MM）にする', async () => {
+    const { repository } = await loaded({
+      rpc: (name) => (name === 'update_template' ? { result: 'blocked', reason: 'locked', month: '2026-09-01' } : {}),
+    })
+    await expect(repository.updateTemplate('tpl1', WIFI, '2026-08')).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'month_locked',
+      detail: '2026-09',
+    })
+  })
+
+  it('元に戻すは undo_update_template に履歴の ID を送り、blocked はそのまま返す', async () => {
+    const { repository, calls } = await loaded({
+      rpc: (name) => (name === 'undo_update_template' ? { result: 'blocked', reason: 'too_late' } : {}),
+    })
+    expect(await repository.undoTemplateChange('c9')).toEqual({ result: 'blocked', reason: 'too_late', detail: {} })
+    expect(calls.rpc.filter((c) => c.name === 'undo_update_template').at(-1)?.args).toEqual({ p_change_id: 'c9' })
+  })
+})
+
 describe('Supabase 実装: 人の設定の書き込み（§2.2。RPC の名前と引数は 0008_salary_to_joint.sql）', () => {
   /** 送った RPC のうち、その名前の最後の1回 */
   const lastRpc = (calls: FakeCalls, name: string) => calls.rpc.filter((c) => c.name === name).at(-1)

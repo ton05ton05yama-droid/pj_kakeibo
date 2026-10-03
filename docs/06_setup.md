@@ -1,6 +1,6 @@
 # セットアップ手順（Supabase を作ってからやること）
 
-- 版: 1.3（2026-10-03。**毎月の支払いの開始月と変更の履歴**〈仕様書 §12.1 Q29〜Q31〉のためのマイグレーション `0010_template_start_and_history.sql` を手順2に足した。1.2 は 2026-09-23。**出す額を決め直したときの給料の入り先**〈仕様書 §12.1 Q27〉のためのマイグレーション `0009_salary_redecide.sql` を手順2に足した。1.1 は同日、**給料の入り先**〈仕様書 §12.1 Q25〉と**出す割合を本人だけ**〈Q26〉のためのマイグレーション `0008_salary_to_joint.sql` を手順2に足し、**もう本番に流したあとから足すとき**の手順を §11 に書いたもの）
+- 版: 1.4（2026-10-03。**毎月の支払いを直すときの「何月分から」**〈仕様書 §12.1 Q32・Q33〉のための `0011_template_edit_from_month.sql` を手順2に足した。1.3 は同日、**毎月の支払いの開始月と変更の履歴**〈仕様書 §12.1 Q29〜Q31〉のためのマイグレーション `0010_template_start_and_history.sql` を手順2に足した。1.2 は 2026-09-23。**出す額を決め直したときの給料の入り先**〈仕様書 §12.1 Q27〉のためのマイグレーション `0009_salary_redecide.sql` を手順2に足した。1.1 は同日、**給料の入り先**〈仕様書 §12.1 Q25〉と**出す割合を本人だけ**〈Q26〉のためのマイグレーション `0008_salary_to_joint.sql` を手順2に足し、**もう本番に流したあとから足すとき**の手順を §11 に書いたもの）
 - 位置づけ: **まさと本人が手を動かすための手順書**。何を決めるかの正本は `docs/05_platform.md`（以下「05」）、データの正本は `docs/04_data_model.md`（以下「04」）、画面の正本は `docs/03_ui_spec.md`（以下「仕様書」）。この文書はそれらを「上から順にやる形」に並べ直したもので、決め事を新しく作らない。
 - 前提: この Mac に Node 24 / pnpm 11 / Docker が入っている。GitHub は個人アカウント `ton05ton05yama-droid`（CLAUDE.md §4）。
 - **まだ決まっていないこと**: 擬似メールのドメイン（05 §9）。手順2の前に決める。
@@ -54,10 +54,11 @@
 | 8 | `supabase/migrations/0008_salary_to_joint.sql` | **給料の入り先**（`household_members.salary_to_joint`・`month_contributions.salary_to_joint`）と、**出す割合・給料の入り先を本人だけ**にする RPC（`update_contribution_rate`・`update_salary_to_joint`）、新しい計算式の `private.month_live`・`decide_contributions`・`update_member`・`month_summary`（04 §2.2・§2.6・§6・§8。仕様書 §12.1 Q25・Q26） |
 | 9 | `supabase/migrations/0009_salary_redecide.sql` | **出す額を決め直したときの給料の入り先**（`decide_contributions` を `create or replace`。決め直しで `salary_to_joint` を `household_members` のいまの値で上書きし、元に戻すための控えにも入れる。`contribution_rate` は保存値のまま。04 §2.6・§8.3。仕様書 §12.1 Q27） |
 | 10 | `supabase/migrations/0010_template_start_and_history.sql` | **毎月の支払いの開始月と変更の履歴**（2026-10-03。仕様書 §12.1 Q29〜Q31）。表 `fixed_cost_template_changes` と RLS、`templates_before_insert` の置き換え（開始月を端末の値で受ける。範囲の外は今月、ロック中の月を含むなら `month_locked`）、履歴を書くトリガー `templates_after_write`、いまあるひな形の「追加」の履歴、`delete_template` の条件の直し、カテゴリ「通信」の推測の語に WiFi（04 §2.4・§2.9・§6・§7・§8.3・§10） |
+| 11 | `supabase/migrations/0011_template_edit_from_month.sql` | **毎月の支払いを直すときの「何月分から」**（2026-10-03。仕様書 §12.1 Q32・Q33）。RPC `update_template`・`undo_update_template`、記録のトリガー `expenses_before_write` と履歴のトリガー `templates_after_write` の置き換え、履歴の値に開始月（04 §2.9・§7・§8.3） |
 
 エラーが出たら、**そのファイルの途中で止まっている**。直してから次に進む（前のファイルを流し直す必要はない。どれも `create or replace` か `create table`）。
 
-**もう 0001〜0007 を流してある場合**（2026-09-23 に足した分。仕様書 §12.1 Q25・Q26）: **0008 と 0009 を順に流す**。0001〜0007 は書き換えないし、流し直さない（04 §11）。**どこまで流したか分からないとき**は、`supabase/check_migrations.sql` を SQL Editor に貼って Run する（読むだけ。番号ごとに `applied` が true／false で出る。2026-10-03）。false の番号から順に流す。**0009 まで流してある場合は 0010 だけ**（2026-10-03。仕様書 §12.1 Q29〜Q31。表を1つ足し、トリガーと `delete_template` を `create or replace` する。いまあるひな形には「追加」の履歴が1件ずつ入るだけで、記録・精算の数字は変わらない）。**0008 まで流してある場合は 0009 だけ**（仕様書 §12.1 Q27。`decide_contributions` の `create or replace` だけで、テーブル・列・RLS は変えない）。0008 は `add column if not exists` と `create or replace` だけなので、**何度流しても同じ結果**になる（0009 も同じ）。列には既定（`false` ＝ 「自分の口座」）があるので、**いまある2人の行とこれまでの月の出す額はそのまま「自分の口座」**になり、**8月・9月の精算額は1円も変わらない**（仕様書 §9.1）。
+**もう 0001〜0007 を流してある場合**（2026-09-23 に足した分。仕様書 §12.1 Q25・Q26）: **0008 と 0009 を順に流す**。0001〜0007 は書き換えないし、流し直さない（04 §11）。**どこまで流したか分からないとき**は、`supabase/check_migrations.sql` を SQL Editor に貼って Run する（読むだけ。番号ごとに `applied` が true／false で出る。2026-10-03）。false の番号から順に流す。**0010 まで流してある場合は 0011 だけ**（2026-10-03。関数を足して置き換えるだけで、表・列は変えない。記録・精算の数字は変わらない）。**0009 まで流してある場合は 0010 だけ**（2026-10-03。仕様書 §12.1 Q29〜Q31。表を1つ足し、トリガーと `delete_template` を `create or replace` する。いまあるひな形には「追加」の履歴が1件ずつ入るだけで、記録・精算の数字は変わらない）。**0008 まで流してある場合は 0009 だけ**（仕様書 §12.1 Q27。`decide_contributions` の `create or replace` だけで、テーブル・列・RLS は変えない）。0008 は `add column if not exists` と `create or replace` だけなので、**何度流しても同じ結果**になる（0009 も同じ）。列には既定（`false` ＝ 「自分の口座」）があるので、**いまある2人の行とこれまでの月の出す額はそのまま「自分の口座」**になり、**8月・9月の精算額は1円も変わらない**（仕様書 §9.1）。
 
 ### (b) psql（何度もやるならこちら）
 

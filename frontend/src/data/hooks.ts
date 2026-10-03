@@ -322,8 +322,22 @@ export function useAddTemplate(): UseMutationResult<void, Error, TemplateInput> 
   return useWrite((r, input: TemplateInput) => r.addTemplate(input))
 }
 
-export function useUpdateTemplate(): UseMutationResult<void, Error, { id: string; input: TemplateInput }> {
-  return useWrite((r, { id, input }) => r.updateTemplate(id, input))
+/** ひな形を直す（`from` は何月分から変えるか）。戻り値は足した履歴の ID（変わらなければ null） */
+export function useUpdateTemplate(): UseMutationResult<
+  string | null,
+  Error,
+  { id: string; input: TemplateInput; from?: MonthKey }
+> {
+  return useWrite((r, { id, input, from }) => r.updateTemplate(id, input, from))
+}
+
+/** 直したのを元に戻す（トーストの「元に戻す」。履歴の ID を渡す） */
+export function useUndoTemplateChange(): UseMutationResult<
+  RpcResult<null, 'too_late' | 'locked' | 'not_found'>,
+  Error,
+  { changeId: string }
+> {
+  return useWrite((r, { changeId }) => r.undoTemplateChange(changeId))
 }
 
 export function useStopTemplate(): UseMutationResult<

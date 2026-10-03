@@ -14,6 +14,7 @@ select no, file, applied from (values
                                                     and column_name = 'salary_to_joint')),
   ('0009', '0009_salary_redecide.sql',   coalesce(position('excluded.salary_to_joint' in
                                                   pg_get_functiondef(to_regprocedure('public.decide_contributions(date, jsonb)'))) > 0, false)),
-  ('0010', '0010_template_start_and_history.sql', to_regclass('public.fixed_cost_template_changes') is not null)
+  ('0010', '0010_template_start_and_history.sql', to_regclass('public.fixed_cost_template_changes') is not null),
+  ('0011', '0011_template_edit_from_month.sql',   to_regprocedure('public.update_template(uuid, text, text, uuid, integer, date)') is not null)
 ) as m(no, file, applied)
 order by no;

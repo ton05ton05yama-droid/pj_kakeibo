@@ -145,7 +145,8 @@ export interface TemplateInput {
   amount: number | null
   /**
    * 何月分から記録するか（追加のときだけ使う。S-32 の［9月分 ▾］）。
-   * 省略・家計を作った月より前・今月より後は今月になる（DB の templates_before_insert と同じ）
+   * 省略・家計を作った月より前・今月より後は今月になる（DB の templates_before_insert と同じ）。
+   * 直すときの「何月分から変えるか」は `updateTemplate` の引数 `from` で渡す
    */
   from?: MonthKey
 }
@@ -268,7 +269,26 @@ export interface Repository {
    * （detail は一番新しいロック中の月 'YYYY-MM'）。履歴の「追加」は DB のトリガーが書く
    */
   addTemplate(input: TemplateInput): Promise<void>
-  updateTemplate(id: string, input: TemplateInput): Promise<void>
+  /**
+   * ひな形を直す（S-32 の［10月分 ▾］から変更します。RPC update_template）。
+   *
+   * - 金額の種類（`input.kind`）は変えない。金額は毎月同じのときだけ使う。
+   * - `from` は何月分から変えるか。既定 ＝ まだ作っていない最初の月（そのひな形の行の最後の対象月の翌月。
+   *   行が無ければ開始月）。省略・家計を作った月より前・既定より後は既定にする。
+   * - `from` が既定より前で、`from` から今月までに精算中・精算済みの月があれば
+   *   `RepositoryError('month_locked')`（detail は一番新しいロック中の月 'YYYY-MM'）。
+   * - `from` 以降の、手つかずで、ロックされていない月の行を新しい値に書き換える。
+   *   `from` が開始月より前なら、開始月を `from` にして、`from` から今月までの行を作る。
+   * - 戻り値は足した履歴の ID（トーストの「元に戻す」で `undoTemplateChange` に渡す）。
+   *   値も開始月も変わらなければ null（何もしない・履歴も足さない）
+   */
+  updateTemplate(id: string, input: TemplateInput, from?: MonthKey): Promise<string | null>
+  /**
+   * 直したのを元に戻す（RPC undo_update_template）。その変更をした人が1分以内で、
+   * それがそのひな形の一番新しい履歴のときだけ。ひな形を前の値（開始月も）に戻し、
+   * その変更で作った行を消し、書き換えた行を前の値に戻し、履歴を消す
+   */
+  undoTemplateChange(changeId: string): Promise<RpcResult<null, 'too_late' | 'locked' | 'not_found'>>
   /** 支払いをやめる（`undo` で取り消す）。`until` はトーストの「（10月から）」 */
   stopTemplate(id: string, undo?: boolean): Promise<RpcResult<{ until: MonthKey | null }, never>>
   /** 追加を元に戻す（作った人が作った直後に、行が手つかずのときだけ） */

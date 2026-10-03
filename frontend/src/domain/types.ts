@@ -130,7 +130,10 @@ export interface FixedCostTemplate {
   createdAt: DateTimeKey
 }
 
-/** ひな形の値（履歴の「変更の前」「変更の後」。DB の jsonb は name・category_id・paid_by・amount_kind・amount） */
+/**
+ * ひな形の値（履歴の「変更の前」「変更の後」。DB の jsonb は name・category_id・paid_by・amount_kind・amount、
+ * 0011 からは start_month も）
+ */
 export interface TemplateValues {
   name: string
   cat: CategoryKey
@@ -138,6 +141,11 @@ export interface TemplateValues {
   kind: AmountKind
   /** 毎月同じの金額。金額待ちは null */
   amount: number | null
+  /**
+   * 開始月（行を作り始める月。jsonb の start_month）。0011 より前に書いた履歴には無い。
+   * S-35 は前と後の両方にあって違うときだけ「記録を始める月 10月分 → 9月分」を出す
+   */
+  from?: MonthKey
 }
 
 /**

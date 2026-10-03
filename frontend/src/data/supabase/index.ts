@@ -577,19 +577,35 @@ export function createSupabaseRepository(
       for (const m of months) await rpc('ensure_month', { p_month: toDbMonth(m) })
     },
 
-    async updateTemplate(id, input) {
+    async updateTemplate(id, input, from) {
       const map = requirePersons()
-      const { error } = await client
-        .from('fixed_cost_templates')
-        .update({
-          name: input.name,
-          category_id: input.cat,
-          paid_by: fromPayer(input.payer, map),
-          amount_kind: input.kind,
-          amount: input.amount,
-        })
-        .eq('id', id)
-      fail(error)
+      // 0011 の update_template（何月分から変えるか・手つかずの行の書き換え・開始月を広げる・履歴は DB が行う）
+      const json = await rpc('update_template', {
+        p_template_id: id,
+        p_name: input.name,
+        p_category_id: input.cat,
+        p_paid_by: fromPayer(input.payer, map),
+        // 金額の種類は変えない。金額待ちのときは DB が無視する
+        p_amount: input.kind === 'fixed' ? input.amount : null,
+        p_from_month: from === undefined ? null : toDbMonth(from),
+      })
+      if (json.result === 'blocked') {
+        // その月から今月までに精算中・精算済みの月があった（addTemplate の month_locked と同じ形にそろえる）
+        if (json.reason === 'locked') {
+          throw new RepositoryError(
+            'month_locked',
+            'その月は精算中です',
+            typeof json.month === 'string' ? toMonthKey(json.month) : null
+          )
+        }
+        throw new RepositoryError('unknown', 'ひな形を直せませんでした')
+      }
+      return typeof json.change_id === 'string' ? json.change_id : null
+    },
+
+    async undoTemplateChange(changeId) {
+      const json = await rpc('undo_update_template', { p_change_id: changeId })
+      return toRpcResult<null, 'too_late' | 'locked' | 'not_found'>(json, () => null)
     },
 
     async stopTemplate(id, undo = false) {

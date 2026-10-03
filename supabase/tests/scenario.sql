@@ -577,3 +577,62 @@ select test.eq('元に戻したら行も履歴も消える',
   + (select count(*) from public.fixed_cost_template_changes where template_id = '10000008-0000-4000-8000-000000000000'), 0::bigint);
 reset role;
 set kakeibo.today = '2026-10-03';
+
+\echo '### 直すときの「何月分から」（仕様書 §12.1 Q32・Q33。0011。04 §8.3）'
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
+-- 光回線（8月分は精算済み）。9〜11月分の行は手つかず（11月分は上の節で 11/2 に作った）
+select test.eq('光回線の行（8〜11月）',
+  (select string_agg(to_char(period_month, 'MM') || ':' || amount, ',' order by period_month) from public.expenses where fixed_cost_id = :'T2'),
+  '08:5500,09:5500,10:5500,11:5500');
+-- 精算済みの8月から変えようとすると止まる
+select test.eq('8月からは変えられない',
+  public.update_template(:'T2', '光回線', 'telecom', :'MA', 4980, '2026-08-01') ->> 'month', '2026-08-01');
+-- 10月分の行だけ、S-14 で個別に金額を直しておく（手つかずではなくなる）
+update public.expenses set amount = 5000 where fixed_cost_id = :'T2' and period_month = '2026-10-01';
+-- 9月分から 4,980 にする: 手つかずの9月分・11月分が書き換わる。8月分（精算済み）・10月分（個別に直した）はそのまま
+select set_config('test.change', public.update_template(:'T2', '光回線', 'telecom', :'MA', 4980, '2026-09-01') ->> 'change_id', false);
+select test.eq('9月分から直した行',
+  (select string_agg(to_char(period_month, 'MM') || ':' || amount, ',' order by period_month) from public.expenses where fixed_cost_id = :'T2'),
+  '08:5500,09:4980,10:5000,11:4980');
+select test.eq('書き換えた行は「直した」にならない',
+  (select updated_at is null and amount_set_by is null from public.expenses where fixed_cost_id = :'T2' and period_month = '2026-09-01'), true);
+select test.eq('履歴は9月分から',
+  (select from_month from public.fixed_cost_template_changes where id = current_setting('test.change')::uuid), '2026-09-01'::date);
+select test.eq('同じ値でもう一度は何もしない',
+  public.update_template(:'T2', '光回線', 'telecom', :'MA', 4980, '2026-09-01') ->> 'change_id', null);
+-- 元に戻す: ひな形も9月分の行も戻り、履歴が消える
+select test.eq('元に戻す', public.undo_update_template(current_setting('test.change')::uuid) ->> 'result', 'ok');
+select test.eq('戻したあとの行',
+  (select string_agg(to_char(period_month, 'MM') || ':' || amount, ',' order by period_month) from public.expenses where fixed_cost_id = :'T2'),
+  '08:5500,09:5500,10:5000,11:5500');
+select test.eq('戻したあとのひな形', (select amount from public.fixed_cost_templates where id = :'T2'), 5500);
+select test.eq('戻したら履歴は消える',
+  (select count(*) from public.fixed_cost_template_changes where id = current_setting('test.change')::uuid), 0::bigint);
+select test.eq('2回目は戻せない', public.undo_update_template(current_setting('test.change')::uuid) ->> 'reason', 'not_found');
+-- 10月分の個別の金額を戻しておく（検証だけの後始末。管理者で）
+reset role;
+update public.expenses set amount = 5500, amount_set_by = null, amount_set_at = null, updated_by = null, updated_at = null
+ where fixed_cost_id = :'T2' and period_month = '2026-10-01';
+
+-- 開始月を広げる: 10月分から足した Wi-Fi を、直すときに9月分からにする
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
+insert into public.fixed_cost_templates (id, household_id, name, category_id, paid_by, amount_kind, amount)
+  values ('1000000a-0000-4000-8000-000000000000', :'H', 'Wi-Fi', 'telecom', null, 'fixed', 4980);
+select test.eq('10月分から足した', public.ensure_month('2026-10-01') >= 1, true);
+select set_config('test.change', public.update_template('1000000a-0000-4000-8000-000000000000', 'Wi-Fi', 'telecom', null, 4980, '2026-09-01') ->> 'change_id', false);
+select test.eq('開始月が9月になる',
+  (select start_month from public.fixed_cost_templates where id = '1000000a-0000-4000-8000-000000000000'), '2026-09-01'::date);
+select test.eq('9月分の行ができる',
+  (select string_agg(to_char(period_month, 'MM') || ':' || amount, ',' order by period_month) from public.expenses where fixed_cost_id = '1000000a-0000-4000-8000-000000000000'),
+  '09:4980,10:4980');
+select test.eq('履歴に開始月の前と後',
+  (select (before ->> 'start_month') || '→' || (after ->> 'start_month') from public.fixed_cost_template_changes where id = current_setting('test.change')::uuid),
+  '2026-10-01→2026-09-01');
+select test.eq('広げたのを元に戻す', public.undo_update_template(current_setting('test.change')::uuid) ->> 'result', 'ok');
+select test.eq('戻すと9月分の行が消え、開始月も戻る',
+  (select string_agg(to_char(period_month, 'MM'), ',' order by period_month) from public.expenses where fixed_cost_id = '1000000a-0000-4000-8000-000000000000')
+  || '/' || (select start_month from public.fixed_cost_templates where id = '1000000a-0000-4000-8000-000000000000'), '10/2026-10-01');
+select test.eq('Wi-Fi の追加を元に戻す', public.delete_template('1000000a-0000-4000-8000-000000000000') ->> 'result', 'ok');
+reset role;

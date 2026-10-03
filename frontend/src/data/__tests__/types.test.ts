@@ -25,6 +25,7 @@ import {
   toPerson,
   toSettlements,
   toTemplate,
+  toTemplateChange,
 } from '../types'
 
 /** 04 §2.2 household_members（position 1 = まさと = a、2 = りさこ = b） */
@@ -136,6 +137,39 @@ describe('家計・人・ひな形', () => {
     })
     // 支払いをやめた行
     expect(toTemplate({ ...row, end_month: '2026-10-01' }, persons).until).toBe('2026-10')
+  })
+
+  it('履歴の before・after に start_month があれば開始月（from）にする。無い古い行は from を持たない', () => {
+    const values = { name: '家賃', category_id: 'housing', paid_by: null, amount_kind: 'fixed', amount: 85000 } as const
+    const change = toTemplateChange(
+      {
+        id: 'c1',
+        template_id: 't1',
+        change: 'update',
+        from_month: '2026-09-01',
+        before: { ...values, start_month: '2026-10-01' },
+        after: { ...values, start_month: '2026-09-01' },
+        changed_by: UID_A,
+        changed_at: '2026-10-03T09:15:00+09:00',
+      },
+      persons
+    )
+    expect(change.before?.from).toBe('2026-10')
+    expect(change.after?.from).toBe('2026-09')
+    const old = toTemplateChange(
+      {
+        id: 'c0',
+        template_id: 't1',
+        change: 'add',
+        from_month: '2026-08-01',
+        before: null,
+        after: values,
+        changed_by: UID_A,
+        changed_at: '2026-08-01T21:00:00+09:00',
+      },
+      persons
+    )
+    expect(old.after).not.toHaveProperty('from')
   })
 })
 

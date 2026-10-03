@@ -43,9 +43,12 @@ export interface TemplateDraft {
   amountBad: boolean
   /** カテゴリのグリッドを出している */
   grid: boolean
-  /** 記録を始める月（追加のときだけ。null = 既定〈今月。今月がロック中なら来月〉） */
+  /**
+   * 追加のときは記録を始める月（null = 既定〈今月。今月がロック中なら来月〉）。
+   * 直すときは変更を始める月（null = 既定〈まだ作っていない最初の月〉）
+   */
   from: MonthKey | null
-  /** 「何月分から」の月のマスを出している（追加のときだけ） */
+  /** 「何月分から」の月のマスを出している */
   monthGrid: boolean
   /** 月のマスの下に出すその場の1行（ロック中の月を押した。§1.4） */
   fromMsg: string | null
@@ -100,7 +103,7 @@ export function newTemplateDraft(): TemplateDraft {
   }
 }
 
-/** 直すシート（ひな形の値を入れて開く） */
+/** 直すシート（ひな形の値を入れて開く。金額の種類は直せない。§12.1 Q33） */
 export function editTemplateDraft(t: FixedCostTemplate): TemplateDraft {
   return {
     id: 'S-32',

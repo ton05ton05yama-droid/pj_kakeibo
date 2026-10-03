@@ -398,29 +398,160 @@ describe('ローカル実装', () => {
   it('直すと「直した」の履歴を、まだ作っていない最初の月から残し、元に戻すと消える', async () => {
     const { repository } = await signedIn('sep-open')
     const original = { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 5500 } as const
-    await repository.updateTemplate('t2', { ...original, name: 'Wi-Fi', amount: 4980 })
+    const changeId = await repository.updateTemplate('t2', { ...original, name: 'Wi-Fi', amount: 4980 })
     const edited = await repository.loadSnapshot()
     expect(edited.data.templateChanges?.at(-1)).toMatchObject({
+      id: changeId,
       templateId: 't2',
       change: 'update',
       from: '2026-10',
-      before: { name: '光回線', amount: 5500 },
-      after: { name: 'Wi-Fi', amount: 4980 },
+      before: { name: '光回線', amount: 5500, from: '2026-08' },
+      after: { name: 'Wi-Fi', amount: 4980, from: '2026-08' },
       by: 'a',
     })
+    // 既定の月（10月）から変えるので、もう作ってある9月の行はそのまま
+    expect(edited.data.expenses.find((e) => e.tpl === 't2' && e.labelMonth === '2026-09')?.amount).toBe(5500)
     const count = edited.data.templateChanges?.length ?? 0
-    // トーストの「元に戻す」（同じ人・1分以内・ちょうど逆向き）は、履歴を足さずに消す
-    await repository.updateTemplate('t2', original)
+    if (changeId === null) throw new Error('履歴の ID が無い')
+    expect(await repository.undoTemplateChange(changeId)).toMatchObject({ result: 'ok' })
     const undone = await repository.loadSnapshot()
+    expect(undone.data.templates.find((t) => t.id === 't2')).toMatchObject(original)
     expect(undone.data.templateChanges).toHaveLength(count - 1)
     expect(undone.data.templateChanges?.some((c) => c.change === 'update')).toBe(false)
   })
 
-  it('何も変わらない保存は履歴を残さない', async () => {
+  it('何も変わらない保存は履歴を残さない（月だけ後にしても同じ）', async () => {
     const { repository, snapshot } = await signedIn('sep-open')
     const count = snapshot.data.templateChanges?.length ?? 0
-    await repository.updateTemplate('t2', { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 5500 })
+    const same = { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 5500 } as const
+    expect(await repository.updateTemplate('t2', same)).toBeNull()
+    expect(await repository.updateTemplate('t2', same, '2026-09')).toBeNull()
     expect((await repository.loadSnapshot()).data.templateChanges).toHaveLength(count)
+  })
+
+  /* 直すときの「何月分から」（S-32・0011 の update_template・undo_update_template） ------------ */
+
+  const RENT = { name: '家賃', cat: 'housing', payer: 'joint', kind: 'fixed', amount: 85000 } as const
+
+  it('前の月から直すと、その月以降の手つかずの行だけを書き換え、履歴の「◯月分から」はその月になる', async () => {
+    // sep-open（9/22）: 9月はまだ精算していない。8月は精算済み
+    const { repository, snapshot } = await signedIn('sep-open')
+    const rentSep = snapshot.data.expenses.find((e) => e.tpl === 't1' && e.labelMonth === '2026-09')
+    const netSep = snapshot.data.expenses.find((e) => e.tpl === 't2' && e.labelMonth === '2026-09')
+    if (!rentSep || !netSep) throw new Error('9月の行が無い')
+    // 光回線の9月の行は S-14 で個別に直す（手つかずではなくなる）
+    await repository.updateExpense(netSep.id, { amount: 5800 })
+
+    await repository.updateTemplate('t1', { ...RENT, amount: 90000 }, '2026-09')
+    await repository.updateTemplate(
+      't2',
+      { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 4980 },
+      '2026-09'
+    )
+    const after = await repository.loadSnapshot()
+    const row = (tpl: string, m: string) => after.data.expenses.find((e) => e.tpl === tpl && e.labelMonth === m)
+    expect(row('t1', '2026-09')?.amount).toBe(90000)
+    // 精算済みの8月の行・個別に直した行はそのまま
+    expect(row('t1', '2026-08')?.amount).toBe(85000)
+    expect(row('t2', '2026-09')?.amount).toBe(5800)
+    // 書き換えた行は手つかずのまま（直した人を付けない）
+    expect(row('t1', '2026-09')?.editedAt).toBeNull()
+    expect(after.data.templateChanges?.filter((c) => c.change === 'update').map((c) => c.from)).toEqual([
+      '2026-09',
+      '2026-09',
+    ])
+  })
+
+  it('選んだ月から今月までにロック中の月があれば、直さない（一番新しいロック中の月を返す）', async () => {
+    const { repository, snapshot } = await signedIn('sep-open')
+    const count = snapshot.data.templateChanges?.length ?? 0
+    await expect(repository.updateTemplate('t1', { ...RENT, amount: 90000 }, '2026-08')).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'month_locked',
+      detail: '2026-08',
+    })
+    const after = await repository.loadSnapshot()
+    expect(after.data.templates.find((t) => t.id === 't1')?.amount).toBe(85000)
+    expect(after.data.templateChanges).toHaveLength(count)
+  })
+
+  it('月が家計を作った月より前・既定の月より後なら、既定の月から変える', async () => {
+    const { repository } = await signedIn('sep-open')
+    await repository.updateTemplate('t1', { ...RENT, amount: 90000 }, '2026-12')
+    await repository.updateTemplate('t1', { ...RENT, amount: 91000 }, '2026-07')
+    const after = await repository.loadSnapshot()
+    expect(after.data.templateChanges?.filter((c) => c.change === 'update').map((c) => c.from)).toEqual([
+      '2026-10',
+      '2026-10',
+    ])
+    expect(after.data.expenses.find((e) => e.tpl === 't1' && e.labelMonth === '2026-09')?.amount).toBe(85000)
+  })
+
+  it('開始月より前の月を選ぶと開始月を広げてその月の行を作り、元に戻すとその行も消える', async () => {
+    // sep-redo（10/3）: 9月はやり直し中（ロックされていない）
+    const { repository } = await signedIn('sep-redo')
+    await repository.addTemplate({ ...NEWS, from: '2026-10' })
+    const added = await repository.loadSnapshot()
+    const t = added.data.templates.find((x) => x.name === '新聞')
+    if (!t) throw new Error('足したひな形が無い')
+    const count = added.data.templateChanges?.length ?? 0
+
+    // 値は同じで月だけ前にしても保存する（開始月が広がる）
+    const changeId = await repository.updateTemplate(t.id, NEWS, '2026-09')
+    const after = await repository.loadSnapshot()
+    expect(after.data.templates.find((x) => x.id === t.id)?.from).toBe('2026-09')
+    const months = after.data.expenses.filter((e) => e.tpl === t.id).map((e) => e.labelMonth)
+    expect(months.sort()).toEqual(['2026-09', '2026-10'])
+    expect(after.data.templateChanges?.at(-1)).toMatchObject({
+      id: changeId,
+      change: 'update',
+      from: '2026-09',
+      before: { from: '2026-10' },
+      after: { from: '2026-09' },
+    })
+
+    if (changeId === null) throw new Error('履歴の ID が無い')
+    expect(await repository.undoTemplateChange(changeId)).toMatchObject({ result: 'ok' })
+    const undone = await repository.loadSnapshot()
+    expect(undone.data.templates.find((x) => x.id === t.id)?.from).toBe('2026-10')
+    expect(undone.data.expenses.filter((e) => e.tpl === t.id).map((e) => e.labelMonth)).toEqual(['2026-10'])
+    expect(undone.data.templateChanges).toHaveLength(count)
+  })
+
+  it('元に戻すと、書き換えた行も前の値に戻る', async () => {
+    const { repository } = await signedIn('sep-open')
+    const changeId = await repository.updateTemplate('t1', { ...RENT, name: '家賃と駐車場', amount: 97000 }, '2026-09')
+    if (changeId === null) throw new Error('履歴の ID が無い')
+    expect(await repository.undoTemplateChange(changeId)).toMatchObject({ result: 'ok' })
+    const undone = await repository.loadSnapshot()
+    expect(undone.data.expenses.find((e) => e.tpl === 't1' && e.labelMonth === '2026-09')).toMatchObject({
+      memo: '家賃',
+      amount: 85000,
+    })
+    expect(undone.data.templates.find((t) => t.id === 't1')).toMatchObject(RENT)
+  })
+
+  it('元に戻せるのは、変更をした人が1分以内で、それが一番新しい履歴のときだけ', async () => {
+    const { repository } = await signedIn('sep-open')
+    expect(await repository.undoTemplateChange('nothing')).toMatchObject({ result: 'blocked', reason: 'not_found' })
+
+    const first = await repository.updateTemplate('t1', { ...RENT, amount: 90000 })
+    const second = await repository.updateTemplate('t1', { ...RENT, amount: 91000 })
+    if (first === null || second === null) throw new Error('履歴の ID が無い')
+    // 一番新しい履歴ではない
+    expect(await repository.undoTemplateChange(first)).toMatchObject({ result: 'blocked', reason: 'too_late' })
+
+    // 2分前の変更
+    const snapshot = await repository.loadSnapshot()
+    const c = snapshot.data.templateChanges?.find((x) => x.id === second)
+    if (!c) throw new Error('履歴が無い')
+    c.at = '2026-09-22T12:28'
+    expect(await repository.undoTemplateChange(second)).toMatchObject({ result: 'blocked', reason: 'too_late' })
+    c.at = snapshot.now
+
+    // 相手（りさこ）は戻せない
+    await repository.auth.signIn('risako', 'pw')
+    expect(await repository.undoTemplateChange(second)).toMatchObject({ result: 'blocked', reason: 'too_late' })
   })
 
   it('やめると「やめた」の履歴を残し、やめるを取り消すと消える', async () => {

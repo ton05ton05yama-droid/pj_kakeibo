@@ -14,7 +14,7 @@ export interface HistoryLine {
   name: string
   /** 1段目の右「10月分から」 */
   from: string
-  /** 2段目「追加 5,500円・まさと」「名前 光回線 → Wi-Fi、通信 → エンタメ」「やめました」 */
+  /** 2段目「追加 5,500円・まさと」「記録を始める月 10月分 → 9月分、名前 光回線 → Wi-Fi」「やめました」 */
   what: string
   /** 3段目「まさと 10/3」 */
   who: string
@@ -29,7 +29,7 @@ function amountText(v: TemplateValues): string {
   return v.kind === 'variable' || v.amount === null ? '金額待ち' : formatYenSuffix(v.amount)
 }
 
-/** 2段目（直したときは変わった項目を「、」でつなぐ。並びは 名前・カテゴリ・払う人・金額） */
+/** 2段目（直したときは変わった項目を「、」でつなぐ。並びは 記録を始める月・名前・カテゴリ・払う人・金額） */
 function whatText(c: TemplateChange, people: Record<PersonKey, Person>): string {
   if (c.change === 'stop') return 'やめました'
   if (c.change === 'add') {
@@ -40,6 +40,10 @@ function whatText(c: TemplateChange, people: Record<PersonKey, Person>): string 
   const a = c.after
   if (b === null || a === null) return ''
   const parts: string[] = []
+  // 開始月は、前と後の両方にあって違うときだけ（0011 より前の履歴には開始月が無い）
+  if (b.from !== undefined && a.from !== undefined && b.from !== a.from) {
+    parts.push(`記録を始める月 ${monthLabel(b.from)}分 → ${monthLabel(a.from)}分`)
+  }
   if (b.name !== a.name) parts.push(`名前 ${b.name} → ${a.name}`)
   if (b.cat !== a.cat) parts.push(`${categoryName(b.cat)} → ${categoryName(a.cat)}`)
   if (b.payer !== a.payer) parts.push(`${payerName(b.payer, people)} → ${payerName(a.payer, people)}`)

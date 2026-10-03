@@ -141,6 +141,19 @@ export function unskipRow(d: HouseholdData, id: string): void {
 }
 
 /**
+ * まだ作っていない最初の月（そのひな形の行の最後の対象月の翌月。行が無ければ開始月）。
+ * 直すときの「［10月分 ▾］から変更します」の既定・やめたときの「（10月から）」（0011 の update_template と同じ）
+ */
+export function firstUnmadeMonth(d: HouseholdData, t: FixedCostTemplate): MonthKey {
+  let last: MonthKey | null = null
+  for (const e of d.expenses) {
+    if (e.tpl !== t.id || e.labelMonth === null) continue
+    if (last === null || e.labelMonth > last) last = e.labelMonth
+  }
+  return last === null ? t.from : addMonth(last, 1)
+}
+
+/**
  * その月の毎月の支払いの行を作る（§6.5。DB の RPC ensure_month と同じ）。
  * ひな形 × 対象月で1行だけ。ロック中の月には作らない。作った行を返す。
  */

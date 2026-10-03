@@ -16,7 +16,16 @@ import {
 import { LabelBox } from '@/components/primitives'
 import { RepositoryError, type TemplateInput } from '@/data'
 import type { AmountKind, CategoryKey, DateTimeKey, HouseholdData, MonthKey, Payer } from '@/domain'
-import { addMonth, CATEGORIES, categoryName, guessCategory, isLockedStatus, monthStatus, monthsBetween } from '@/domain'
+import {
+  addMonth,
+  CATEGORIES,
+  categoryName,
+  firstUnmadeMonth,
+  guessCategory,
+  isLockedStatus,
+  monthStatus,
+  monthsBetween,
+} from '@/domain'
 import { MonthGrid } from '@/features/monthPicker'
 import { lockedMessage } from '@/features/record/messages'
 import { parsePastedAmount } from '@/lib/amount'
@@ -36,7 +45,7 @@ export type FixedCostSheetProps = {
   draft: TemplateDraft
   onDraft: (next: TemplateDraft) => void
   data: HouseholdData
-  /** 今月（追加のときの「9月分から記録します」） */
+  /** 今月（追加のときの「［9月分 ▾］から記録します」） */
   month: MonthKey
   /** 今月がもう精算中・精算済み（そのときは来月分から作る） */
   monthLocked: boolean
@@ -53,7 +62,11 @@ export type FixedCostSheetProps = {
  *
  * 見出しは置かない（一番大きく見せるものは名前の欄。読み上げ名はシートの名前。§4.0.3）。
  * 名前を入れるとカテゴリを推測して入れる（§8）。払う人の既定は共用、金額の既定は「毎月同じ」。
- * 直したときの変更は**まだ作っていない月から**効く（§6.5。今月分は S-14 `fixed` で直す）。
+ *
+ * 直すときは「［10月分 ▾］から変更します」で何月分から変えるかを選べる（§12.1 Q32）。既定は
+ * まだ作っていない最初の月。前の月を選ぶと、その月以降の**手つかずの行だけ**を新しい値に書き換える
+ * （S-14 で個別に直した行・精算中や精算済みの月の行はそのまま）。開始月より前を選ぶと開始月が広がる。
+ * 直すときは金額の種類を出さない（直せない。種類を変えたいときは、やめて足し直す。Q33）。
  */
 export function FixedCostSheet({
   draft,
@@ -82,6 +95,7 @@ export function FixedCostSheet({
   const saving = useRef(false)
 
   const editing = draft.tplId !== null
+  const template = editing ? data.templates.find((t) => t.id === draft.tplId) : undefined
   const state = draft.err ? 'action' : editing ? 'normal' : 'empty'
   const label = editing ? `毎月の支払いを直す（${draft.origName}）` : '毎月の支払いを追加'
 
@@ -89,8 +103,9 @@ export function FixedCostSheet({
     draft.err && draft.err.field === field ? draft.err.text : undefined
   const footError = draft.err && draft.err.field === null ? draft.err : null
 
-  // 記録を始める月（追加のときだけ）。既定は今月、今月がロック中なら来月（S-32）
-  const defaultFrom = monthLocked ? addMonth(month, 1) : month
+  // 追加のときは記録を始める月。既定は今月、今月がロック中なら来月（S-32）。
+  // 直すときは変更を始める月。既定はまだ作っていない最初の月（そのひな形の行の最後の対象月の翌月）
+  const defaultFrom = template ? firstUnmadeMonth(data, template) : monthLocked ? addMonth(month, 1) : month
   const startMonth = draft.from ?? defaultFrom
 
   // カテゴリが空のまま保存したら、カテゴリのチップにフォーカスを移す（気づけるように）
@@ -101,10 +116,12 @@ export function FixedCostSheet({
 
   /**
    * その月から今月までにある、精算中・精算済みの月のうち一番新しい月の1行
-   * 「9月は精算中です（先に精算をやり直します）」（§1.4）。無ければ null
+   * 「9月は精算中です（先に精算をやり直します）」（§1.4）。無ければ null。
+   * 確かめるのは、既定より前の月を選んだときだけ（追加は今月より前、直すときはまだ作っていない最初の月より前。
+   * DB の templates_before_insert・update_template と同じ）
    */
   const lockedLineFrom = (from: MonthKey): string | null => {
-    if (from >= month) return null
+    if (from >= (editing ? defaultFrom : month)) return null
     const locked = monthsBetween(from, month).filter((m) => isLockedStatus(monthStatus(data, m, now)))
     const newest = locked.at(-1)
     return newest === undefined ? null : lockedMessage(newest, monthStatus(data, newest, now))
@@ -162,7 +179,8 @@ export function FixedCostSheet({
     if (draft.cat === null) return fail('カテゴリを選んでください', 'cat')
     if (draft.kind === 'fixed' && draft.amountBad) return fail('金額を入れてください', 'amount')
     if (draft.kind === 'fixed' && Number(draft.amount) === 0) {
-      return fail('金額を入れるか「金額待ち」を選んでください', 'amount')
+      // 直すときは金額の種類を選べないので「金額を入れてください」だけ
+      return fail(editing ? '金額を入れてください' : '金額を入れるか「金額待ち」を選んでください', 'amount')
     }
     const input: TemplateInput = {
       name,
@@ -171,37 +189,26 @@ export function FixedCostSheet({
       kind: draft.kind,
       amount: draft.kind === 'fixed' ? Number(draft.amount) : null,
     }
-    const id = draft.tplId
-    if (id !== null) {
-      const before = data.templates.find((t) => t.id === id)
-      if (!before) return
-      const beforeInput: TemplateInput = {
-        name: before.name,
-        cat: before.cat,
-        payer: before.payer,
-        kind: before.kind,
-        amount: before.amount,
-      }
-      // 何も変わっていなければ、何もせずに閉じる（トーストも出さない）
-      if (
-        beforeInput.name === input.name &&
-        beforeInput.cat === input.cat &&
-        beforeInput.payer === input.payer &&
-        beforeInput.kind === input.kind &&
-        beforeInput.amount === input.amount
-      ) {
-        onDone()
-        return
-      }
+    if (editing && !template) return
+    // 何も変わっていなければ（月だけ変えても値が同じなら）、何もせずに閉じる（トーストも出さない）。
+    // ただし開始月より前の月を選んだときは、開始月が広がるので保存する
+    if (
+      template &&
+      template.name === input.name &&
+      template.cat === input.cat &&
+      template.payer === input.payer &&
+      (template.kind !== 'fixed' || template.amount === input.amount) &&
+      startMonth >= template.from
+    ) {
       onDone()
-      await actions.updateTemplate(id, input, beforeInput)
       return
     }
-    // 追加は、サーバーが断ったとき（相手が先に精算した、など）にシートに1行を出すので、書けてから閉じる
+    // サーバーが断ったとき（相手が先に精算した、など）にシートに1行を出すので、書けてから閉じる
     if (saving.current) return
     saving.current = true
     try {
-      await actions.addTemplate({ ...input, from: startMonth })
+      if (template) await actions.updateTemplate(template.id, input, startMonth)
+      else await actions.addTemplate({ ...input, from: startMonth })
     } catch (error) {
       if (error instanceof RepositoryError && error.code === 'month_locked') {
         const m = (error.detail ?? startMonth).slice(0, 7)
@@ -226,14 +233,14 @@ export function FixedCostSheet({
   }
 
   // 「何月分から」の月のマスを出しているあいだは、シートの中身をマスに差し替える（シートを重ねない。§4.0.3・B8）
-  if (draft.monthGrid && !editing) {
+  if (draft.monthGrid) {
     return (
       <BottomSheet open label={label} onClose={onClose} tall initialFocusRef={monthCellRef}>
         <Box data-screen='S-32' data-state={state}>
           <Box mt={1} mb={1}>
             <SheetHeader>何月分から</SheetHeader>
           </Box>
-          {/* 選べる月は 家計を作った月 〜 既定の開始月（範囲の外はボタンにしない。P7） */}
+          {/* 選べる月は 家計を作った月 〜 既定の月（範囲の外はボタンにしない。P7） */}
           <MonthGrid
             viewMonth={startMonth}
             firstMonth={data.household.createdMonth}
@@ -344,14 +351,23 @@ export function FixedCostSheet({
 
         <Field mt={2}>
           <FieldLabel id={kindLabelId}>金額</FieldLabel>
-          <Segmented
-            items={KIND_ITEMS}
-            value={draft.kind}
-            onChange={(kind) => onDraft({ ...draft, kind, dirty: true, err: null })}
-            label='金額'
-          />
+          {/* 直すときは金額の種類を出さない（直せない。§12.1 Q33） */}
+          {editing ? null : (
+            <Segmented
+              items={KIND_ITEMS}
+              value={draft.kind}
+              onChange={(kind) => onDraft({ ...draft, kind, dirty: true, err: null })}
+              label='金額'
+            />
+          )}
+          {editing && draft.kind === 'variable' ? (
+            // 金額待ちは値の表示（押せない）
+            <Box fontSize='lg' fontWeight='medium' color='text.main' lineHeight='ui'>
+              金額待ち
+            </Box>
+          ) : null}
           {draft.kind === 'fixed' ? (
-            <Box mt={2}>
+            <Box {...(editing ? {} : { mt: 2 })}>
               <BareInput
                 id={amountId}
                 aria-label='毎月の金額'
@@ -368,32 +384,29 @@ export function FixedCostSheet({
           {errorFor('amount') ? <InlineMessage tone='error'>{errorFor('amount')}</InlineMessage> : null}
         </Field>
 
-        {editing ? (
-          <Box mt={2} fontSize='sm' fontWeight='medium' color='text.muted' lineHeight='ui'>
-            {`変更は${monthLabel(addMonth(month, 1))}分から`}
-          </Box>
-        ) : (
-          // 開始月の行「［9月分 ▾］から記録します」。チップのタップ領域 44px がそのまま行の高さ
-          <Flex
-            alignItems='center'
-            minH='tapMin'
-            mt='4px'
-            fontSize='md'
-            fontWeight='medium'
-            color='text.sub'
-            lineHeight='ui'
+        {/*
+          月の行。追加は「［9月分 ▾］から記録します」、直すときは「［10月分 ▾］から変更します」。
+          チップのタップ領域 44px がそのまま行の高さ
+        */}
+        <Flex
+          alignItems='center'
+          minH='tapMin'
+          mt='4px'
+          fontSize='md'
+          fontWeight='medium'
+          color='text.sub'
+          lineHeight='ui'
+        >
+          <Chip
+            ref={fromButtonRef}
+            label={`${editing ? '変更を始める月' : '記録を始める月'} ${monthLabel(startMonth)}分（押すと選び直す）`}
+            iconEnd='expand'
+            onClick={() => onDraft({ ...draft, monthGrid: true, fromMsg: null })}
           >
-            <Chip
-              ref={fromButtonRef}
-              label={`記録を始める月 ${monthLabel(startMonth)}分（押すと選び直す）`}
-              iconEnd='expand'
-              onClick={() => onDraft({ ...draft, monthGrid: true, fromMsg: null })}
-            >
-              {`${monthLabel(startMonth)}分`}
-            </Chip>
-            <span>から記録します</span>
-          </Flex>
-        )}
+            {`${monthLabel(startMonth)}分`}
+          </Chip>
+          <span>{editing ? 'から変更します' : 'から記録します'}</span>
+        </Flex>
         {footError ? (
           <Box mt={1}>
             <InlineMessage tone='info'>{footError.text}</InlineMessage>

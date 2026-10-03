@@ -116,13 +116,15 @@ export interface FixedCostTemplateRow {
   created_at: string
 }
 
-/** 履歴の before・after の jsonb（0010 の private.template_values） */
+/** 履歴の before・after の jsonb（0010・0011 の private.template_values） */
 export interface TemplateValuesJson {
   name: string
   category_id: string
   paid_by: string | null
   amount_kind: 'fixed' | 'variable'
   amount: number | null
+  /** 開始月（0011 から。それより前に書いた履歴には無い） */
+  start_month?: DbMonth
 }
 
 /** `fixed_cost_template_changes`（04 §2.9。トリガーだけが書く） */
@@ -270,6 +272,7 @@ function toTemplateValues(json: TemplateValuesJson | null, persons: PersonMap): 
     payer: toPayer(json.paid_by, persons),
     kind: json.amount_kind,
     amount: json.amount,
+    ...(typeof json.start_month === 'string' ? { from: toMonthKey(json.start_month) } : {}),
   }
 }
 

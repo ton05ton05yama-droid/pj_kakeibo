@@ -189,6 +189,30 @@ describe('S-31 毎月の支払い', () => {
     expect(rows.at(-1)).toHaveTextContent('家賃8月分から追加 85,000円・共用まさと 8/1')
   })
 
+  it('S-35: 開始月を広げた変更は「記録を始める月 10月分 → 9月分」を先に出す', async () => {
+    const repository = createLocalRepository('sep-redo')
+    await repository.auth.signIn('masato', 'pw')
+    const news = { name: '新聞', cat: 'other', payer: 'joint', kind: 'fixed', amount: 3000 } as const
+    await repository.addTemplate({ ...news, from: '2026-10' })
+    const t = (await repository.loadSnapshot()).data.templates.find((x) => x.name === '新聞')
+    if (!t) throw new Error('足したひな形が無い')
+    await repository.updateTemplate(t.id, { ...news, amount: 3500 }, '2026-09')
+    setRepository(repository)
+    render(
+      <Wrapper>
+        <SettingsTab />
+      </Wrapper>
+    )
+    await screen.findByText('ふたりの設定')
+    await userEvent.click(screen.getByRole('button', { name: /毎月の支払い/ }))
+    await userEvent.click(await screen.findByRole('button', { name: '変更の履歴' }))
+    const dialog = await screen.findByRole('dialog', { name: '変更の履歴' })
+    const rows = within(dialog).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('新聞9月分から記録を始める月 10月分 → 9月分、3,000円 → 3,500円まさと 10/3')
+    // 追加の行には開始月の変化を出さない
+    expect(rows[1]).toHaveTextContent('新聞10月分から追加 3,000円・共用まさと 10/3')
+  })
+
   it('‹ 設定 で S-30 に戻る', async () => {
     await openS31()
     await userEvent.click(screen.getByRole('button', { name: '設定' }))
@@ -374,15 +398,172 @@ describe('S-32 毎月の支払いを追加・直す', () => {
     expect(within(dialog).queryByLabelText('毎月の金額')).not.toBeInTheDocument()
   })
 
-  it('直すシートは値が入って開き、注記は「変更は10月分から」・下端に［支払いをやめる］が出る', async () => {
-    await setup()
+  async function openEdit(
+    name: string,
+    options: SetupOptions = {}
+  ): Promise<{ repository: Repository; dialog: HTMLElement }> {
+    const repository = await setup(options)
     await userEvent.click(screen.getByRole('button', { name: /毎月の支払い/ }))
-    await userEvent.click(screen.getByRole('button', { name: /家賃/ }))
-    const dialog = await screen.findByRole('dialog', { name: '毎月の支払いを直す（家賃）' })
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(name) }))
+    const dialog = await screen.findByRole('dialog', { name: `毎月の支払いを直す（${name}）` })
+    return { repository, dialog }
+  }
+
+  it('直すシートは値が入って開き、「［10月分 ▾］から変更します」・下端に［支払いをやめる］が出る（金額の種類は出さない）', async () => {
+    const { dialog } = await openEdit('家賃')
     expect(within(dialog).getByLabelText('名前')).toHaveValue('家賃')
     expect(within(dialog).getByLabelText('毎月の金額')).toHaveValue('85000')
-    expect(within(dialog).getByText('変更は10月分から')).toBeInTheDocument()
+    const chip = within(dialog).getByRole('button', { name: '変更を始める月 10月分（押すと選び直す）' })
+    expect(chip).toHaveTextContent('10月分')
+    expect(within(dialog).getByText('から変更します')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/変更は10月分から/)).not.toBeInTheDocument()
+    // 金額の種類のセグメントは無い（直せない。§12.1 Q33）
+    expect(within(dialog).queryByRole('radio', { name: '毎月同じ' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('radio', { name: '金額待ち' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '支払いをやめる' })).toBeInTheDocument()
+  })
+
+  it('金額待ちのひな形を直すときは、金額の欄の代わりに値の表示「金額待ち」を出す', async () => {
+    const { dialog } = await openEdit('ガス代')
+    expect(within(dialog).getByText('金額待ち')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('毎月の金額')).not.toBeInTheDocument()
+    // ラジオは払う人のセグメントの3つだけ
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(3)
+    expect(within(dialog).queryByRole('radio', { name: '金額待ち' })).not.toBeInTheDocument()
+  })
+
+  it('毎月同じのひな形で金額を空にして保存すると「金額を入れてください」', async () => {
+    const { dialog } = await openEdit('家賃')
+    await userEvent.clear(within(dialog).getByLabelText('毎月の金額'))
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(within(dialog).getByText('金額を入れてください')).toBeInTheDocument()
+  })
+
+  it('前の月から直すと、その月以降の手つかずの行だけを書き換える（個別に直した行はそのまま）', async () => {
+    const { repository } = await openEdit('光回線')
+    // 家賃の9月の行は S-14 で個別に直してある
+    const before = await repository.loadSnapshot()
+    const rentSep = before.data.expenses.find((e) => e.tpl === 't1' && e.labelMonth === '2026-09')
+    if (!rentSep) throw new Error('9月の行が無い')
+    await repository.updateExpense(rentSep.id, { amount: 86000 })
+    await userEvent.click(screen.getByRole('button', { name: '閉じる' }))
+
+    await userEvent.click(screen.getByRole('button', { name: /家賃/ }))
+    const dialog = await screen.findByRole('dialog', { name: '毎月の支払いを直す（家賃）' })
+    await userEvent.click(within(dialog).getByRole('button', { name: '変更を始める月 10月分（押すと選び直す）' }))
+    expect(within(dialog).getByText('何月分から')).toBeInTheDocument()
+    // 選べるのは 家計を作った月（8月）〜 既定の月（10月）
+    expect(within(dialog).getByRole('button', { name: '2026年8月' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '2026年10月' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '2026年11月' })).not.toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年9月 今月' }))
+    const chip = within(dialog).getByRole('button', { name: '変更を始める月 9月分（押すと選び直す）' })
+    expect(document.activeElement).toBe(chip)
+
+    const amount = within(dialog).getByLabelText('毎月の金額')
+    await userEvent.clear(amount)
+    await userEvent.type(amount, '90000')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('保存しました')).toBeInTheDocument()
+    const after = await repository.loadSnapshot()
+    expect(after.data.templates.find((t) => t.id === 't1')?.amount).toBe(90000)
+    // 個別に直した9月の行はそのまま
+    expect(after.data.expenses.find((e) => e.id === rentSep.id)?.amount).toBe(86000)
+    expect(after.data.templateChanges?.at(-1)).toMatchObject({ templateId: 't1', change: 'update', from: '2026-09' })
+  })
+
+  it('前の月から直すと手つかずの行が変わり、トーストの「元に戻す」で行も戻って履歴も消える', async () => {
+    const { repository, dialog } = await openEdit('光回線')
+    await userEvent.click(within(dialog).getByRole('button', { name: '変更を始める月 10月分（押すと選び直す）' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年9月 今月' }))
+    const amount = within(dialog).getByLabelText('毎月の金額')
+    await userEvent.clear(amount)
+    await userEvent.type(amount, '4980')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await screen.findByText('保存しました')
+    const edited = await repository.loadSnapshot()
+    expect(edited.data.expenses.find((e) => e.tpl === 't2' && e.labelMonth === '2026-09')?.amount).toBe(4980)
+
+    await userEvent.click(screen.getByRole('button', { name: '元に戻す' }))
+    await waitFor(async () => {
+      const snapshot = await repository.loadSnapshot()
+      expect(snapshot.data.templates.find((t) => t.id === 't2')?.amount).toBe(5500)
+      expect(snapshot.data.expenses.find((e) => e.tpl === 't2' && e.labelMonth === '2026-09')?.amount).toBe(5500)
+      expect(snapshot.data.templateChanges?.some((c) => c.change === 'update')).toBe(false)
+    })
+  })
+
+  it('直すときに開始月より前の月を選ぶと、その月の行を作る（sep-redo ＝ 10/3）', async () => {
+    const repository = createLocalRepository('sep-redo')
+    await repository.auth.signIn('masato', 'pw')
+    await repository.addTemplate({
+      name: '新聞',
+      cat: 'other',
+      payer: 'joint',
+      kind: 'fixed',
+      amount: 3000,
+      from: '2026-10',
+    })
+    setRepository(repository)
+    render(
+      <Wrapper>
+        <SettingsTab />
+      </Wrapper>
+    )
+    await screen.findByText('ふたりの設定')
+    await userEvent.click(screen.getByRole('button', { name: /毎月の支払い/ }))
+    await userEvent.click(screen.getByRole('button', { name: /新聞/ }))
+    const dialog = await screen.findByRole('dialog', { name: '毎月の支払いを直す（新聞）' })
+    // 10月の行はもうあるので、既定は11月
+    await userEvent.click(within(dialog).getByRole('button', { name: '変更を始める月 11月分（押すと選び直す）' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年9月' }))
+    // 値は変えずに月だけ前にしても保存する（開始月が広がる）
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('保存しました')).toBeInTheDocument()
+    const after = await repository.loadSnapshot()
+    const t = after.data.templates.find((x) => x.name === '新聞')
+    expect(t?.from).toBe('2026-09')
+    expect(
+      after.data.expenses
+        .filter((e) => e.tpl === t?.id)
+        .map((e) => e.labelMonth)
+        .sort()
+    ).toEqual(['2026-09', '2026-10'])
+  })
+
+  it('直すときに月だけ後のままで値も同じなら、何もせずに閉じる', async () => {
+    const { repository, dialog } = await openEdit('家賃')
+    const count = (await repository.loadSnapshot()).data.templateChanges?.length ?? 0
+    await userEvent.click(within(dialog).getByRole('button', { name: '変更を始める月 10月分（押すと選び直す）' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年9月 今月' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '毎月の支払いを直す（家賃）' })).not.toBeInTheDocument()
+    )
+    expect(screen.queryByText('保存しました')).not.toBeInTheDocument()
+    expect((await repository.loadSnapshot()).data.templateChanges).toHaveLength(count)
+  })
+
+  it('直すときにロック中の月が入る月を押すと、選ばずにマスの下に案内を出す', async () => {
+    const { dialog } = await openEdit('家賃')
+    await userEvent.click(within(dialog).getByRole('button', { name: '変更を始める月 10月分（押すと選び直す）' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年8月' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('8月は精算済みです（先に精算をやり直します）')
+    expect(within(dialog).getByText('何月分から')).toBeInTheDocument()
+  })
+
+  it('直して保存したときにサーバーがロック中を返したら、シートを閉じずに固定部分の直上に案内を出す', async () => {
+    const { repository, dialog } = await openEdit('家賃')
+    repository.updateTemplate = async () => {
+      throw new RepositoryError('month_locked', 'その月は精算中です', '2026-09')
+    }
+    const amount = within(dialog).getByLabelText('毎月の金額')
+    await userEvent.clear(amount)
+    await userEvent.type(amount, '90000')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('9月は精算中です（先に精算をやり直します）')
+    expect(screen.getByRole('dialog', { name: '毎月の支払いを直す（家賃）' })).toBeInTheDocument()
+    expect(screen.queryByText('保存しました')).not.toBeInTheDocument()
   })
 
   it('支払いをやめると、トースト「◯◯をやめました（10月から）」が出て一覧から外れる', async () => {
