@@ -5,12 +5,92 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider, useToast } from '@/app/providers/toast-provider'
-import { BottomSheet, Keypad, Segmented, TabBar, tabs } from '@/components'
+import { BottomSheet, DatePickerOverlay, Keypad, Segmented, TabBar, tabs } from '@/components'
 import { system } from '@/theme'
 
 function wrap(ui: ReactNode) {
   return render(<ChakraProvider value={system}>{ui}</ChakraProvider>)
 }
+
+describe('日付の欄（§4 S-12 の要素5）', () => {
+  afterEach(() => {
+    // jsdom には showPicker が無いので、テストの中だけ足す
+    Reflect.deleteProperty(HTMLInputElement.prototype, 'showPicker')
+  })
+
+  it('欄を直接押すと日付選択を開く。断られたら focus に任せる', async () => {
+    const showPicker = vi.fn(() => {
+      throw new DOMException('not allowed', 'NotAllowedError')
+    })
+    Object.defineProperty(HTMLInputElement.prototype, 'showPicker', { value: showPicker, configurable: true })
+    const onOpen = vi.fn()
+    const onChange = vi.fn()
+    const { container } = wrap(
+      <DatePickerOverlay
+        value=''
+        min='2026-08-01'
+        max='2026-09-22'
+        onOpen={onOpen}
+        onChange={onChange}
+        onReset={() => {}}
+      />
+    )
+    const input = container.querySelector('input[type="date"]') as HTMLInputElement
+    await userEvent.click(input)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(showPicker).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: '2026-09-05' } })
+    expect(onChange).toHaveBeenCalledWith('2026-09-05')
+  })
+
+  it('範囲の外の日（今日より先・家計を作る前）は受けない', () => {
+    const onChange = vi.fn()
+    const { container } = wrap(
+      <DatePickerOverlay value='' min='2026-08-01' max='2026-09-22' onChange={onChange} onReset={() => {}} />
+    )
+    const input = container.querySelector('input[type="date"]') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '2026-10-03' } })
+    fireEvent.change(input, { target: { value: '2026-07-31' } })
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.change(input, { target: { value: '2026-09-22' } })
+    expect(onChange).toHaveBeenCalledWith('2026-09-22')
+  })
+
+  it('value 属性は書かず、中身だけ入れる（iPhone の「リセット」が value 属性の日に戻すため）', () => {
+    const { container, rerender } = wrap(
+      <DatePickerOverlay value='2026-09-10' min='2026-08-01' max='2026-09-22' onChange={() => {}} onReset={() => {}} />
+    )
+    const input = container.querySelector('input[type="date"]') as HTMLInputElement
+    expect(input.value).toBe('2026-09-10')
+    expect(input.getAttribute('value')).toBeNull()
+    rerender(
+      <ChakraProvider value={system}>
+        <DatePickerOverlay
+          value='2026-09-19'
+          min='2026-08-01'
+          max='2026-09-22'
+          onChange={() => {}}
+          onReset={() => {}}
+        />
+      </ChakraProvider>
+    )
+    expect(input.value).toBe('2026-09-19')
+    expect(input.getAttribute('value')).toBeNull()
+  })
+
+  it('「リセット」で欄が空になったら onReset を呼ぶ（§12.1 Q28）', () => {
+    const onChange = vi.fn()
+    const onReset = vi.fn()
+    const { container } = wrap(
+      <DatePickerOverlay value='2026-09-10' min='2026-08-01' max='2026-09-22' onChange={onChange} onReset={onReset} />
+    )
+    const input = container.querySelector('input[type="date"]') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
+    expect(onReset).toHaveBeenCalledTimes(1)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})
 
 describe('セグメント（§7.5）', () => {
   it('選択中の項目が分かり、押すと選び直せる', async () => {

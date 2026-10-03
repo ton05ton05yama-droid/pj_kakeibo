@@ -12,11 +12,12 @@ import { PasswordSheet } from './password-sheet'
 import { PersonSheet } from './person-sheet'
 import { SettingsScreen } from './settings-screen'
 import { editTemplateDraft, isDirty, newTemplateDraft, passwordDraft, personDraft, type SheetDraft } from './sheets'
+import { TemplateHistorySheet } from './template-history-sheet'
 import { useAddToHome } from './use-add-to-home'
 import { useSettingsActions } from './use-settings-actions'
 
 /**
- * 設定タブ（S-30 → S-31 と、S-03・S-32〜S-34 のシート）。
+ * 設定タブ（S-30 → S-31 と、S-03・S-32〜S-35 のシート）。
  *
  * シートはルートにしない（§4.0.3）。入力はここが持ち、閉じたときの
  * 「入力をやめました　元に戻す」で同じ入力のまま開き直せるようにする（§1.4・§3.7）。
@@ -67,6 +68,7 @@ export function SettingsTab() {
   const templates = data.templates.filter((t) => t.until === null)
   const month = monthOf(snapshot.now)
   const monthLocked = isLockedStatus(monthStatus(data, month, snapshot.now))
+  const templateChanges = data.templateChanges ?? []
 
   const setDefaultPayer = (value: DefaultPayer): void => {
     // オフラインのときは切り替えない（保留もしない）。この行の直下に1行を出す（§3.6）
@@ -122,10 +124,16 @@ export function SettingsTab() {
           online={online}
           onBack={() => setSub('S-30')}
           onOpen={openTemplate}
+          hasHistory={templateChanges.length > 0}
+          onOpenHistory={() => openSheet({ id: 'S-35' })}
         />
       )}
 
       {sheet?.id === 'S-03' ? <AddToHomeSheet onClose={closeSheet} /> : null}
+
+      {sheet?.id === 'S-35' ? (
+        <TemplateHistorySheet changes={templateChanges} people={data.people} onClose={closeSheet} />
+      ) : null}
 
       {sheet?.id === 'S-32' ? (
         <FixedCostSheet
@@ -134,6 +142,7 @@ export function SettingsTab() {
           data={data}
           month={month}
           monthLocked={monthLocked}
+          now={snapshot.now}
           onClose={closeSheet}
           onDone={dropSheet}
           online={online}

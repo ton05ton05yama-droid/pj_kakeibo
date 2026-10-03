@@ -1,5 +1,6 @@
 import { Box, Flex } from '@chakra-ui/react'
-import { Avatar, BackAppBar, Icon, OfflineRow, PrimaryButton, usePageScrolled } from '@/components'
+import type { ReactNode } from 'react'
+import { Avatar, BackAppBar, Icon, OfflineRow, PrimaryButton, TextButton, usePageScrolled } from '@/components'
 import type { FixedCostTemplate, HouseholdData, Payer } from '@/domain'
 import { formatNumber, formatYen } from '@/lib/format'
 import { DashTag, SettingsGroup, SettingsRow } from './settings-ui'
@@ -11,6 +12,10 @@ export type FixedCostsPageProps = {
   onBack: () => void
   /** 行を押す（null = ＋ 追加） */
   onOpen: (id: string | null) => void
+  /** 変更の履歴が1件以上ある（そのときだけ「変更の履歴」を出す） */
+  hasHistory: boolean
+  /** 「変更の履歴」を押す（S-35 を開く） */
+  onOpenHistory: () => void
   online: boolean
 }
 
@@ -21,13 +26,27 @@ export type FixedCostsPageProps = {
  * 並びは「毎月同じ（金額の多い順）」→「金額待ち」。
  * その月の金額はここでは入れない（支出・精算で入れる）。
  * 状態: `empty`（1文と塗りの［＋ 追加］）／ `normal`。
+ * ［＋ 追加］の下に文字ボタン「変更の履歴」（履歴が1件以上あるときだけ。条件つき (+1)）。
  */
-export function FixedCostsPage({ data, templates, onBack, onOpen, online }: FixedCostsPageProps) {
+export function FixedCostsPage({
+  data,
+  templates,
+  onBack,
+  onOpen,
+  hasHistory,
+  onOpenHistory,
+  online,
+}: FixedCostsPageProps) {
   const scrolled = usePageScrolled()
   const fixed = templates.filter((t) => t.kind === 'fixed').sort((x, y) => (y.amount ?? 0) - (x.amount ?? 0))
   const variable = templates.filter((t) => t.kind === 'variable')
   const total = fixed.reduce((sum, t) => sum + (t.amount ?? 0), 0)
   const empty = templates.length === 0
+  const historyButton: ReactNode = hasHistory ? (
+    <Flex justifyContent='center' mt='8px' mb='24px'>
+      <TextButton onClick={onOpenHistory}>変更の履歴</TextButton>
+    </Flex>
+  ) : null
 
   return (
     <Box data-screen='S-31' data-state={empty ? 'empty' : 'normal'}>
@@ -47,6 +66,7 @@ export function FixedCostsPage({ data, templates, onBack, onOpen, online }: Fixe
               追加
             </PrimaryButton>
           </Box>
+          {historyButton}
         </>
       ) : (
         <>
@@ -84,11 +104,12 @@ export function FixedCostsPage({ data, templates, onBack, onOpen, online }: Fixe
             ))}
           </SettingsGroup>
 
-          <SettingsGroup mt='8px' mb='24px'>
+          <SettingsGroup mt='8px' {...(hasHistory ? {} : { mb: '24px' })}>
             <SettingsRow leading={<Icon name='add' />} accent onClick={() => onOpen(null)}>
               追加
             </SettingsRow>
           </SettingsGroup>
+          {historyButton}
         </>
       )}
     </Box>

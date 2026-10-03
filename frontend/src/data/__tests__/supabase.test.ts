@@ -89,6 +89,18 @@ const TABLES: Record<string, Record<string, unknown>[]> = {
   ],
   profiles: [{ user_id: UID_A, onboarded_at: '2026-08-01T21:00:00+09:00', last_seen_at: null }],
   fixed_cost_templates: [],
+  fixed_cost_template_changes: [
+    {
+      id: 'c1',
+      template_id: 'tpl1',
+      change: 'update',
+      from_month: '2026-10-01',
+      before: { name: '光回線', category_id: 'telecom', paid_by: UID_A, amount_kind: 'fixed', amount: 5500 },
+      after: { name: 'Wi-Fi', category_id: 'telecom', paid_by: null, amount_kind: 'variable', amount: null },
+      changed_by: UID_B,
+      changed_at: '2026-10-03T09:15:12+09:00',
+    },
+  ],
   expenses: [
     {
       id: 'e1',
@@ -245,6 +257,60 @@ describe('Supabase 実装: 読み込み', () => {
     expect(snapshot.data.household.createdMonth).toBe('2026-08')
     expect(snapshot.data.expenses).toHaveLength(1)
     expect(snapshot.onboardedAt).toBe('2026-08-01T21:00')
+  })
+})
+
+describe('Supabase 実装: 毎月の支払いの開始月と変更の履歴（0010）', () => {
+  it('履歴の行をドメインの形にする（払う人・変えた人は a / b・共用、月は YYYY-MM）', async () => {
+    const { repository } = await loaded()
+    const snapshot = await repository.loadSnapshot()
+    expect(snapshot.data.templateChanges).toEqual([
+      {
+        id: 'c1',
+        templateId: 'tpl1',
+        change: 'update',
+        from: '2026-10',
+        before: { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 5500 },
+        after: { name: 'Wi-Fi', cat: 'telecom', payer: 'joint', kind: 'variable', amount: null },
+        by: 'b',
+        at: '2026-10-03T09:15',
+      },
+    ])
+  })
+
+  it('開始月を送り、開始月から今月までの各月に ensure_month を呼ぶ', async () => {
+    const { repository, calls } = await loaded()
+    await repository.addTemplate({
+      name: '新聞',
+      cat: 'other',
+      payer: 'joint',
+      kind: 'fixed',
+      amount: 3000,
+      from: '2026-09',
+    })
+    expect(calls.inserts.at(-1)?.row).toMatchObject({ start_month: '2026-09-01' })
+    const ensured = calls.rpc.filter((c) => c.name === 'ensure_month').map((c) => c.args.p_month)
+    expect(ensured).toEqual(['2026-09-01', '2026-10-01'])
+  })
+
+  it('開始月を渡さないときは今までどおり 2000-01-01（トリガーが今月にする）', async () => {
+    const { repository, calls } = await loaded()
+    await repository.addTemplate({ name: '新聞', cat: 'other', payer: 'joint', kind: 'fixed', amount: 3000 })
+    expect(calls.inserts.at(-1)?.row).toMatchObject({ start_month: '2000-01-01' })
+  })
+
+  it('トリガーの month_locked は、detail を月（YYYY-MM）にして返す', async () => {
+    const { repository } = await loaded({ tableError: () => ({ message: 'month_locked', details: '2026-09-01' }) })
+    await expect(
+      repository.addTemplate({
+        name: '新聞',
+        cat: 'other',
+        payer: 'joint',
+        kind: 'fixed',
+        amount: 3000,
+        from: '2026-08',
+      })
+    ).rejects.toMatchObject({ name: 'RepositoryError', code: 'month_locked', detail: '2026-09' })
   })
 })
 

@@ -6,7 +6,18 @@
  * リロードで初期状態に戻る。
  */
 
-import type { Contribution, DateTimeKey, Expense, HouseholdData, MonthKey, PersonKey, ScenarioId } from '../../domain'
+import type {
+  Contribution,
+  DateTimeKey,
+  Expense,
+  FixedCostTemplate,
+  HouseholdData,
+  MonthKey,
+  PersonKey,
+  ScenarioId,
+  TemplateChange,
+  TemplateValues,
+} from '../../domain'
 import {
   addMonth,
   buildScenario,
@@ -24,6 +35,7 @@ import {
   isLockedStatus,
   monthOf,
   monthStatus,
+  monthsBetween,
   monthsUntil,
   PERSON_KEYS,
   saveContributions,
@@ -54,6 +66,49 @@ function elapsedMs(from: DateTimeKey, to: DateTimeKey): number {
   return new Date(to).getTime() - new Date(from).getTime()
 }
 
+/** ひな形の値（履歴の before・after。DB の private.template_values と同じ項目） */
+function templateValuesOf(t: FixedCostTemplate): TemplateValues {
+  return { name: t.name, cat: t.cat, payer: t.payer, kind: t.kind, amount: t.amount }
+}
+
+function sameValues(x: TemplateValues, y: TemplateValues): boolean {
+  return x.name === y.name && x.cat === y.cat && x.payer === y.payer && x.kind === y.kind && x.amount === y.amount
+}
+
+/** 履歴が無ければ、ひな形から「追加」を作る（見本データ〈§9〉は履歴を持たない。DB の 0010 と同じ入れ方） */
+function seedTemplateChanges(d: HouseholdData): TemplateChange[] {
+  if (d.templateChanges === undefined) {
+    d.templateChanges = d.templates.map((t) => ({
+      id: `c-${t.id}-add`,
+      templateId: t.id,
+      change: 'add' as const,
+      from: t.from,
+      before: null,
+      after: templateValuesOf(t),
+      by: t.createdBy,
+      at: t.createdAt,
+    }))
+  }
+  return d.templateChanges
+}
+
+/** 履歴の ID（ローカルだけ。DB は gen_random_uuid） */
+let changeSeq = 0
+const nextChangeId = (): string => `c-${Date.now().toString(36)}-${++changeSeq}`
+
+/** そのひな形の一番新しい履歴（古い順に持っているので後ろから探す） */
+function latestChange(
+  changes: readonly TemplateChange[],
+  templateId: string,
+  change?: TemplateChange['change']
+): TemplateChange | undefined {
+  for (let i = changes.length - 1; i >= 0; i--) {
+    const c = changes[i]
+    if (c && c.templateId === templateId && (change === undefined || c.change === change)) return c
+  }
+  return undefined
+}
+
 /** 「今日」は見本データの時点から動かさない（02 §10 C10。now は必ず引数で渡す） */
 interface LocalState {
   data: HouseholdData
@@ -74,6 +129,7 @@ function loginKey(state: LocalState, loginId: string): PersonKey | null {
 
 export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Repository {
   const built = buildScenario(scenario)
+  seedTemplateChanges(built.data)
   const state: LocalState = {
     data: built.data,
     now: built.now,
@@ -448,47 +504,123 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
 
     async addTemplate(input: TemplateInput) {
       const viewer = requireSignedIn()
-      const m = monthOf(state.now)
-      state.data.templates.push({
-        id: `t-${Date.now().toString(36)}`,
+      const current = monthOf(state.now)
+      // 開始月: 省略・家計を作った月より前・今月より後は今月（DB の templates_before_insert と同じ）
+      let from = input.from ?? current
+      if (from < state.data.household.createdMonth || from > current) from = current
+      // 前の月から始めるときは、今月までに精算中・精算済みの月が無いこと（一番新しいロック中の月を返す）
+      if (from < current) {
+        const locked = monthsBetween(from, current).filter((m) => isLockedStatus(monthStatus(state.data, m, state.now)))
+        const newest = locked.at(-1)
+        if (newest !== undefined) throw new RepositoryError('month_locked', 'その月は精算中です', newest)
+      }
+      const t: FixedCostTemplate = {
+        id: `t-${Date.now().toString(36)}-${++changeSeq}`,
         name: input.name,
         cat: input.cat,
         payer: input.payer,
         kind: input.kind,
         amount: input.amount,
-        from: m,
+        from,
         until: null,
         createdBy: viewer,
         createdAt: state.now,
+      }
+      state.data.templates.push(t)
+      seedTemplateChanges(state.data).push({
+        id: nextChangeId(),
+        templateId: t.id,
+        change: 'add',
+        from,
+        before: null,
+        after: templateValuesOf(t),
+        by: viewer,
+        at: state.now,
       })
-      // 追加したら今月分の行をすぐ作る（S-32「9月分から記録します」）
-      ensureMonth(state.data, m, state.now)
+      // 追加したら開始月から今月までの行をすぐ作る（S-32「9月分から記録します」。ロック中の月には作らない）
+      for (const m of monthsBetween(from, current)) ensureMonth(state.data, m, state.now)
     },
 
     async updateTemplate(id, input) {
-      requireSignedIn()
+      const viewer = requireSignedIn()
       const t = state.data.templates.find((x) => x.id === id)
       if (!t) throw new RepositoryError('unknown', 'ひな形が見つかりません')
+      const before = templateValuesOf(t)
       t.name = input.name
       t.cat = input.cat
       t.payer = input.payer
       t.kind = input.kind
       t.amount = input.amount
+      const after = templateValuesOf(t)
+      if (sameValues(before, after)) return
+      // 履歴（DB の templates_after_write と同じ決まり）
+      const changes = seedTemplateChanges(state.data)
+      const last = latestChange(changes, id)
+      const since = last === undefined ? Number.NaN : elapsedMs(last.at, state.now)
+      if (
+        last !== undefined &&
+        last.change === 'update' &&
+        last.by === viewer &&
+        Number.isFinite(since) &&
+        since <= 60_000 &&
+        last.before !== null &&
+        last.after !== null &&
+        sameValues(last.before, after) &&
+        sameValues(last.after, before)
+      ) {
+        // ちょうど逆向きの変更＝元に戻した。新しい履歴は足さずに、直前の履歴を消す
+        state.data.templateChanges = changes.filter((c) => c !== last)
+        return
+      }
+      // 何月分から効くか: まだ作っていない最初の月（そのひな形の行の最後の対象月の翌月。行が無ければ開始月）
+      const months = state.data.expenses
+        .filter((e) => e.tpl === id && e.labelMonth !== null)
+        .map((e) => e.labelMonth as MonthKey)
+      const lastMonth = months.length === 0 ? null : months.reduce((x, y) => (x > y ? x : y))
+      changes.push({
+        id: nextChangeId(),
+        templateId: id,
+        change: 'update',
+        from: lastMonth === null ? t.from : addMonth(lastMonth, 1),
+        before,
+        after,
+        by: viewer,
+        at: state.now,
+      })
     },
 
     async stopTemplate(id, undo = false) {
-      requireSignedIn()
+      const viewer = requireSignedIn()
       const t = state.data.templates.find((x) => x.id === id)
       if (!t) return ok({ until: null })
+      const changes = seedTemplateChanges(state.data)
       if (undo) {
+        if (t.until !== null) {
+          // やめるの取り消し: 一番新しい「やめた」を消す
+          const last = latestChange(changes, id, 'stop')
+          if (last) state.data.templateChanges = changes.filter((c) => c !== last)
+        }
         t.until = null
         return ok({ until: null })
       }
+      const wasRunning = t.until === null
       const months = state.data.expenses
         .filter((e) => e.tpl === id && e.labelMonth !== null)
         .map((e) => e.labelMonth as MonthKey)
       const last = months.length === 0 ? null : months.reduce((x, y) => (x > y ? x : y))
       t.until = last === null ? t.from : addMonth(last, 1)
+      if (wasRunning) {
+        changes.push({
+          id: nextChangeId(),
+          templateId: id,
+          change: 'stop',
+          from: t.until,
+          before: templateValuesOf(t),
+          after: null,
+          by: viewer,
+          at: state.now,
+        })
+      }
       return ok({ until: t.until })
     },
 
@@ -497,13 +629,9 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
       const t = state.data.templates.find((x) => x.id === id)
       if (!t) return blocked('not_found', {})
       const rows = state.data.expenses.filter((e) => e.tpl === id)
+      // 開始月から今月まで複数の月に行ができるので、対象月は問わない（0010 の delete_template と同じ）
       const untouched = rows.every(
-        (e) =>
-          e.labelMonth === t.from &&
-          e.month === e.labelMonth &&
-          e.amountBy === null &&
-          e.editedAt === null &&
-          !e.skipped
+        (e) => e.month === e.labelMonth && e.amountBy === null && e.editedAt === null && !e.skipped
       )
       // 作った人・行が手つかず・作ってから1分のあいだだけ（04 §8.2 delete_template）
       const since = elapsedMs(t.createdAt, state.now)
@@ -515,6 +643,8 @@ export function createLocalRepository(scenario: ScenarioId = 'sep-open'): Reposi
       }
       state.data.expenses = state.data.expenses.filter((e) => e.tpl !== id)
       state.data.templates = state.data.templates.filter((x) => x.id !== id)
+      // 履歴も消える（DB は on delete cascade）
+      state.data.templateChanges = seedTemplateChanges(state.data).filter((c) => c.templateId !== id)
       return ok(null)
     },
 

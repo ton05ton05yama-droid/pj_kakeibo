@@ -337,6 +337,120 @@ describe('ローカル実装', () => {
     expect(kept.data.templates.some((t) => t.id === second.id)).toBe(true)
   })
 
+  /* 毎月の支払いの開始月と変更の履歴（S-32・S-35。0010 と同じ決まり） ---------------- */
+
+  const NEWS = { name: '新聞', cat: 'other', payer: 'joint', kind: 'fixed', amount: 3000 } as const
+
+  it('読み込むと、見本データのひな形から「追加」の履歴を作る', async () => {
+    const { snapshot } = await signedIn('sep-open')
+    const changes = snapshot.data.templateChanges ?? []
+    expect(changes).toHaveLength(snapshot.data.templates.length)
+    expect(changes[0]).toMatchObject({
+      templateId: 't1',
+      change: 'add',
+      from: '2026-08',
+      before: null,
+      after: { name: '家賃', cat: 'housing', payer: 'joint', kind: 'fixed', amount: 85000 },
+      by: 'a',
+      at: '2026-08-01T21:00',
+    })
+  })
+
+  it('前の月から始めると、開始月から今月までの各月に行を作り、「追加」の履歴を残す', async () => {
+    // sep-redo（10/3）: 9月はやり直し中（ロックされていない）、8月は精算済み
+    const { repository } = await signedIn('sep-redo')
+    await repository.addTemplate({ ...NEWS, from: '2026-09' })
+    const after = await repository.loadSnapshot()
+    const t = after.data.templates.find((x) => x.name === '新聞')
+    expect(t?.from).toBe('2026-09')
+    const rows = after.data.expenses.filter((e) => e.tpl === t?.id)
+    expect(rows.map((e) => e.labelMonth).sort()).toEqual(['2026-09', '2026-10'])
+    expect(after.data.templateChanges?.at(-1)).toMatchObject({
+      templateId: t?.id,
+      change: 'add',
+      from: '2026-09',
+      after: { name: '新聞', amount: 3000, payer: 'joint' },
+      by: 'a',
+    })
+  })
+
+  it('開始月から今月までにロック中の月があれば、追加しない（一番新しいロック中の月を返す）', async () => {
+    // sep-transfer（10/1）: 8月は精算済み・9月は精算中
+    const { repository } = await signedIn('sep-transfer')
+    await expect(repository.addTemplate({ ...NEWS, from: '2026-08' })).rejects.toMatchObject({
+      name: 'RepositoryError',
+      code: 'month_locked',
+      detail: '2026-09',
+    })
+    const after = await repository.loadSnapshot()
+    expect(after.data.templates.some((x) => x.name === '新聞')).toBe(false)
+  })
+
+  it('開始月が家計を作った月より前・今月より後なら、今月から作る', async () => {
+    const { repository } = await signedIn('sep-open')
+    await repository.addTemplate({ ...NEWS, from: '2026-07' })
+    await repository.addTemplate({ ...NEWS, name: '新聞2', from: '2026-12' })
+    const after = await repository.loadSnapshot()
+    expect(after.data.templates.find((x) => x.name === '新聞')?.from).toBe('2026-09')
+    expect(after.data.templates.find((x) => x.name === '新聞2')?.from).toBe('2026-09')
+  })
+
+  it('直すと「直した」の履歴を、まだ作っていない最初の月から残し、元に戻すと消える', async () => {
+    const { repository } = await signedIn('sep-open')
+    const original = { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 5500 } as const
+    await repository.updateTemplate('t2', { ...original, name: 'Wi-Fi', amount: 4980 })
+    const edited = await repository.loadSnapshot()
+    expect(edited.data.templateChanges?.at(-1)).toMatchObject({
+      templateId: 't2',
+      change: 'update',
+      from: '2026-10',
+      before: { name: '光回線', amount: 5500 },
+      after: { name: 'Wi-Fi', amount: 4980 },
+      by: 'a',
+    })
+    const count = edited.data.templateChanges?.length ?? 0
+    // トーストの「元に戻す」（同じ人・1分以内・ちょうど逆向き）は、履歴を足さずに消す
+    await repository.updateTemplate('t2', original)
+    const undone = await repository.loadSnapshot()
+    expect(undone.data.templateChanges).toHaveLength(count - 1)
+    expect(undone.data.templateChanges?.some((c) => c.change === 'update')).toBe(false)
+  })
+
+  it('何も変わらない保存は履歴を残さない', async () => {
+    const { repository, snapshot } = await signedIn('sep-open')
+    const count = snapshot.data.templateChanges?.length ?? 0
+    await repository.updateTemplate('t2', { name: '光回線', cat: 'telecom', payer: 'a', kind: 'fixed', amount: 5500 })
+    expect((await repository.loadSnapshot()).data.templateChanges).toHaveLength(count)
+  })
+
+  it('やめると「やめた」の履歴を残し、やめるを取り消すと消える', async () => {
+    const { repository } = await signedIn('sep-open')
+    await repository.stopTemplate('t1')
+    const stopped = await repository.loadSnapshot()
+    expect(stopped.data.templateChanges?.at(-1)).toMatchObject({
+      templateId: 't1',
+      change: 'stop',
+      from: '2026-10',
+      before: { name: '家賃' },
+      after: null,
+    })
+    await repository.stopTemplate('t1', true)
+    const back = await repository.loadSnapshot()
+    expect(back.data.templateChanges?.some((c) => c.change === 'stop')).toBe(false)
+  })
+
+  it('追加を元に戻すと、複数の月の行と履歴も消える', async () => {
+    const { repository } = await signedIn('sep-redo')
+    await repository.addTemplate({ ...NEWS, from: '2026-09' })
+    const added = await repository.loadSnapshot()
+    const t = added.data.templates.find((x) => x.name === '新聞')
+    if (!t) throw new Error('足したひな形が無い')
+    expect(await repository.deleteTemplate(t.id)).toMatchObject({ result: 'ok' })
+    const after = await repository.loadSnapshot()
+    expect(after.data.expenses.some((e) => e.tpl === t.id)).toBe(false)
+    expect(after.data.templateChanges?.some((c) => c.templateId === t.id)).toBe(false)
+  })
+
   /* オフラインの保留（§3.6。記録の追加だけ） -------------------------------- */
 
   it('保留した記録は合計に入らず、つながったら送られる', async () => {

@@ -130,6 +130,35 @@ export interface FixedCostTemplate {
   createdAt: DateTimeKey
 }
 
+/** ひな形の値（履歴の「変更の前」「変更の後」。DB の jsonb は name・category_id・paid_by・amount_kind・amount） */
+export interface TemplateValues {
+  name: string
+  cat: CategoryKey
+  payer: Payer
+  kind: AmountKind
+  /** 毎月同じの金額。金額待ちは null */
+  amount: number | null
+}
+
+/**
+ * 毎月の支払いの変更の履歴（S-35。DB は public.fixed_cost_template_changes。トリガーだけが書く）。
+ * add = 追加した、update = 直した、stop = やめた。
+ */
+export interface TemplateChange {
+  id: string
+  templateId: string
+  change: 'add' | 'update' | 'stop'
+  /** 何月分から効くか（「10月分から」） */
+  from: MonthKey
+  /** 変更の前の値（add は null） */
+  before: TemplateValues | null
+  /** 変更の後の値（stop は null） */
+  after: TemplateValues | null
+  /** 変えた人（DB で人が分からない古い行だけ null） */
+  by: PersonKey | null
+  at: DateTimeKey
+}
+
 /** 記録（§9.4・§9.5。DB は public.expenses） */
 export interface Expense {
   id: string
@@ -250,6 +279,11 @@ export interface HouseholdData {
   household: Household
   people: Record<PersonKey, Person>
   templates: FixedCostTemplate[]
+  /**
+   * 毎月の支払いの変更の履歴（古い順。S-35）。省略可（見本データ〈§9〉は持たない。
+   * ローカル実装は読み込み時にひな形から「追加」を作る）
+   */
+  templateChanges?: TemplateChange[]
   contributions: Record<MonthKey, MonthContributions>
   expenses: Expense[]
   settlements: Record<MonthKey, MonthSettlement>

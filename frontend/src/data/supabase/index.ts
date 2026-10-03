@@ -6,8 +6,8 @@
  * - 帰属月・記録した人・金額を入れた人・ひな形の追加した月はサーバーが入れるので、端末の値を当てにしない。
  */
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js'
-import type { DateTimeKey, Expense, HouseholdData, PersonAmounts, PersonKey } from '../../domain'
-import { PERSON_KEYS } from '../../domain'
+import type { DateTimeKey, Expense, HouseholdData, MonthKey, PersonAmounts, PersonKey } from '../../domain'
+import { monthsBetween, PERSON_KEYS } from '../../domain'
 import { createPendingApi, deviceNow, withPending } from '../pending'
 import {
   type AuthRepository,
@@ -27,6 +27,7 @@ import {
   type AppStatusJson,
   buildPersonMap,
   type ExpenseRow,
+  type FixedCostTemplateChangeRow,
   type FixedCostTemplateRow,
   fromPayer,
   type HouseholdMemberRow,
@@ -46,6 +47,7 @@ import {
   toPerson,
   toSettlements,
   toTemplate,
+  toTemplateChange,
 } from '../types'
 import {
   createSupabaseClient,
@@ -64,6 +66,8 @@ const EXPENSE_COLUMNS =
 
 const TEMPLATE_COLUMNS =
   'id, name, category_id, paid_by, amount_kind, amount, start_month, end_month, created_by, created_at'
+
+const TEMPLATE_CHANGE_COLUMNS = 'id, template_id, change, from_month, before, after, changed_by, changed_at'
 
 interface RpcJson {
   result?: 'ok' | 'already' | 'blocked' | 'stale'
@@ -133,6 +137,8 @@ export function createSupabaseRepository(
   let householdId: string | null = null
   /** 最後に読んだログイン中の人（オフラインでも保留の行に持たせる） */
   let viewer: PersonKey | null = null
+  /** 最後に読んだ今月（サーバーの日付。ひな形を足したあとに開始月から今月までの行を作るのに使う） */
+  let currentMonth: MonthKey | null = null
 
   function toRpcResult<T, R extends string>(json: RpcJson, pick: (j: RpcJson) => T): RpcResult<T, R> {
     if (json.result === 'blocked') return blockedFrom(json, 'unknown' as R, persons)
@@ -206,8 +212,9 @@ export function createSupabaseRepository(
       // app_status は毎月の支払いの行の生成（ensure_month）も済ませる（04 §3）
       const status = (await rpc('app_status')) as unknown as AppStatusJson
       const now = nowFrom(status.today)
+      currentMonth = toMonthKey(status.current_month)
 
-      const [households, members, profiles, templates, expenses, contributions, settlements, lines, checks] =
+      const [households, members, profiles, templates, changes, expenses, contributions, settlements, lines, checks] =
         await Promise.all([
           client.from('households').select('id, name, start_month').limit(1).single(),
           client
@@ -218,6 +225,11 @@ export function createSupabaseRepository(
             .order('position'),
           client.from('profiles').select('user_id, onboarded_at, last_seen_at'),
           client.from('fixed_cost_templates').select(TEMPLATE_COLUMNS).order('created_at'),
+          client
+            .from('fixed_cost_template_changes')
+            .select(TEMPLATE_CHANGE_COLUMNS)
+            .order('changed_at')
+            .limit(READ_LIMIT),
           client.from('expenses').select(EXPENSE_COLUMNS).limit(READ_LIMIT),
           client
             .from('month_contributions')
@@ -243,6 +255,7 @@ export function createSupabaseRepository(
       fail(members.error)
       fail(profiles.error)
       fail(templates.error)
+      fail(changes.error)
       fail(expenses.error)
       fail(contributions.error)
       fail(settlements.error)
@@ -251,7 +264,7 @@ export function createSupabaseRepository(
 
       // 上限ぴったりなら、読み切れていない見込みが高い（ページングは入れていない）。
       // 合計がずれたまま画面に出すより、読めなかったことを伝えて止める
-      for (const result of [expenses, lines, checks]) {
+      for (const result of [expenses, changes, lines, checks]) {
         if (Array.isArray(result.data) && result.data.length >= READ_LIMIT) {
           throw new RepositoryError('unknown', 'データが多すぎます（読み切れませんでした）')
         }
@@ -283,6 +296,9 @@ export function createSupabaseRepository(
         household: toHousehold(householdRow, config.emailDomain),
         people: { a: people.a, b: people.b },
         templates: ((templates.data ?? []) as unknown as FixedCostTemplateRow[]).map((t) => toTemplate(t, map)),
+        templateChanges: ((changes.data ?? []) as unknown as FixedCostTemplateChangeRow[]).map((c) =>
+          toTemplateChange(c, map)
+        ),
         contributions: contributionMap,
         expenses: ((expenses.data ?? []) as unknown as ExpenseRow[]).map((e) => toExpense(e, map)),
         settlements: toSettlements(
@@ -538,14 +554,27 @@ export function createSupabaseRepository(
           paid_by: fromPayer(input.payer, map),
           amount_kind: input.kind,
           amount: input.amount,
-          // 追加した月はトリガーが DB の今日の月で入れる（04 §7）。送る値は使われない
-          start_month: '2000-01-01',
+          // 開始月。範囲の外（省略の 2000-01-01 も）はトリガーが今月にする（0010 の templates_before_insert）
+          start_month: input.from === undefined ? '2000-01-01' : toDbMonth(input.from),
         })
         .select('start_month')
         .single()
-      fail(error)
-      // 追加したら今月分の行をすぐ作る（S-32「9月分から記録します」。04 §3）
-      await rpc('ensure_month', { p_month: (data as unknown as { start_month: string }).start_month })
+      if (error !== null) {
+        const converted = toRepositoryError(error)
+        // 開始月から今月までに精算中・精算済みの月があった（detail はその月の1日 → 月にそろえる）
+        if (converted.code === 'month_locked') {
+          throw new RepositoryError(
+            'month_locked',
+            converted.message,
+            converted.detail === null ? null : toMonthKey(converted.detail)
+          )
+        }
+        throw converted
+      }
+      // 追加したら開始月から今月までの行をすぐ作る（S-32「9月分から記録します」。04 §3）
+      const start = toMonthKey((data as unknown as { start_month: string }).start_month)
+      const months = currentMonth !== null && start <= currentMonth ? monthsBetween(start, currentMonth) : [start]
+      for (const m of months) await rpc('ensure_month', { p_month: toDbMonth(m) })
     },
 
     async updateTemplate(id, input) {

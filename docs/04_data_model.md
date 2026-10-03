@@ -1,6 +1,6 @@
 # データモデル（Supabase）
 
-- 版: 1.7（2026-09-23。ユーザーの決定〈仕様書 §12.1 Q27〉で **出す額を決め直したときは `salary_to_joint` だけ `household_members` のいまの値で上書きする**ようにした: `decide_contributions` の `on conflict do update` で `salary_to_joint = excluded.salary_to_joint`〈`contribution_rate` は今までどおり保存値のまま〉にし、元に戻すために `private.contribution_undo.rows` に `salary_to_joint` を控え、`undo_decide_contributions` が前の値に戻すようにした〈§2.6・§8.3〉。**0001〜0008 は本番に流し済みなので書き換えず、新しいマイグレーション `supabase/migrations/0009_salary_redecide.sql` として足す**〈§11〉。1.6 は同日、ユーザーの決定〈仕様書 §12.1 Q25・Q26〉で **給料の入り先**を足し、**出す割合と給料の入り先を本人だけ**が変えられるようにした: `household_members.salary_to_joint` と `month_contributions.salary_to_joint`〈決めた時点のスナップショット。割合と同じ〉を足し、`private.month_live` の式を `精算額 ＝ 出す額 − 立替 − 共用に入った給料` に直し、`joint_balance`・`salary_in`・`salary_applied`・`salary_remainder`・`has_salary_to_joint` を返すようにし、`decide_contributions` が給料の入り先も月に控えるようにし、`update_member` が**相手の行では割合を変えない**ようにして、本人限定の RPC `update_contribution_rate`・`update_salary_to_joint` を足した〈`update_default_payer` と同じ仕組み。§2.2・§6.1・§8〉。**0001〜0007 は本番に流し済みなので書き換えず、新しいマイグレーション `supabase/migrations/0008_salary_to_joint.sql` として足した**〈§11〉。1.5 は同日、ユーザーの決定〈仕様書 §12.1 Q2〉で **月の途中でも精算できる**ようにした: `settle_confirm` から「締め待ちの月だけ」の条件を外し〈`open` でも押せる〉、`private.s20_state()` に `p_settle_mode` を足し、`defer_expense` から `month_not_ended` を外し、`app_status` のお知らせ行を「月が終わった精算中の月」だけにした。あわせて 〈§12.1 Q9〉で初期データの呼び名・ID を **まさと `masato` ／ りさこ `risako`** に確定させた。**テーブル・制約・RLS は変えていない**。1.4 は同日、ユーザーの決定〈仕様書 §12.1 Q3〉で `household_members.default_payer`〈記録の既定の払った人。本人だけが変えられる〉と RPC `update_default_payer` を足した。1.3 は同日、カテゴリの初期データを15件にし〈仕様書 §8。`subscriptions` → `entertainment`、`medical`・`big_purchase`・`tax` を追加〉、画面の対応表に S-04〈月を選ぶ〉を足したもの〈1.3 ではテーブル・制約・RLS・RPC を変えていない〉。1.2 は同日、記録をタブにしたのに合わせて S-11・S-12 の呼び方を直したもの。1.1 は同日、出す額の元に戻すをサーバーの控え〈`private.contribution_undo`〉から戻す形にしたもの）
+- 版: 1.8（2026-10-03。ユーザーの決定〈仕様書 §12.1 Q29〜Q31〉で、**毎月の支払いの開始月を S-32 で選べる**ようにし〈§2.4・§7〉、**ひな形の変更の履歴** `fixed_cost_template_changes` を足した〈§2.9・§6・§7。`0010_template_start_and_history.sql`〉。1.7 は 2026-09-23。ユーザーの決定〈仕様書 §12.1 Q27〉で **出す額を決め直したときは `salary_to_joint` だけ `household_members` のいまの値で上書きする**ようにした: `decide_contributions` の `on conflict do update` で `salary_to_joint = excluded.salary_to_joint`〈`contribution_rate` は今までどおり保存値のまま〉にし、元に戻すために `private.contribution_undo.rows` に `salary_to_joint` を控え、`undo_decide_contributions` が前の値に戻すようにした〈§2.6・§8.3〉。**0001〜0008 は本番に流し済みなので書き換えず、新しいマイグレーション `supabase/migrations/0009_salary_redecide.sql` として足す**〈§11〉。1.6 は同日、ユーザーの決定〈仕様書 §12.1 Q25・Q26〉で **給料の入り先**を足し、**出す割合と給料の入り先を本人だけ**が変えられるようにした: `household_members.salary_to_joint` と `month_contributions.salary_to_joint`〈決めた時点のスナップショット。割合と同じ〉を足し、`private.month_live` の式を `精算額 ＝ 出す額 − 立替 − 共用に入った給料` に直し、`joint_balance`・`salary_in`・`salary_applied`・`salary_remainder`・`has_salary_to_joint` を返すようにし、`decide_contributions` が給料の入り先も月に控えるようにし、`update_member` が**相手の行では割合を変えない**ようにして、本人限定の RPC `update_contribution_rate`・`update_salary_to_joint` を足した〈`update_default_payer` と同じ仕組み。§2.2・§6.1・§8〉。**0001〜0007 は本番に流し済みなので書き換えず、新しいマイグレーション `supabase/migrations/0008_salary_to_joint.sql` として足した**〈§11〉。1.5 は同日、ユーザーの決定〈仕様書 §12.1 Q2〉で **月の途中でも精算できる**ようにした: `settle_confirm` から「締め待ちの月だけ」の条件を外し〈`open` でも押せる〉、`private.s20_state()` に `p_settle_mode` を足し、`defer_expense` から `month_not_ended` を外し、`app_status` のお知らせ行を「月が終わった精算中の月」だけにした。あわせて 〈§12.1 Q9〉で初期データの呼び名・ID を **まさと `masato` ／ りさこ `risako`** に確定させた。**テーブル・制約・RLS は変えていない**。1.4 は同日、ユーザーの決定〈仕様書 §12.1 Q3〉で `household_members.default_payer`〈記録の既定の払った人。本人だけが変えられる〉と RPC `update_default_payer` を足した。1.3 は同日、カテゴリの初期データを15件にし〈仕様書 §8。`subscriptions` → `entertainment`、`medical`・`big_purchase`・`tax` を追加〉、画面の対応表に S-04〈月を選ぶ〉を足したもの〈1.3 ではテーブル・制約・RLS・RPC を変えていない〉。1.2 は同日、記録をタブにしたのに合わせて S-11・S-12 の呼び方を直したもの。1.1 は同日、出す額の元に戻すをサーバーの控え〈`private.contribution_undo`〉から戻す形にしたもの）
 - 位置づけ: データ（テーブル・制約・RLS・RPC）の**正本**。画面は `docs/03_ui_spec.md`（以下「仕様書」）、お金の計算と月の状態は仕様書 §4.0.2・§6（実装の詳細は `docs/02_settlement.md`。以下「02」）が正本で、この文書はそれを実装できる形に落としたもの。
 - 状態: **草案**。この文書の SQL（`sql` のコードブロックを上から順に流したもの）は、2026-09-22 に Supabase の Postgres イメージ（`public.ecr.aws/supabase/postgres:17.6.1.167`）で適用し、仕様書 §9 の見本データ（8月・9月の全シナリオ）を流して、合計・動かす額・共用の過不足が仕様書 §9.6 と一致すること、RLS が §2.2 の権限表どおりに拒否することを確かめた（§11。見本データとシナリオの SQL は `supabase/tests/`〈`bash supabase/tests/run.sh` で1コマンド〉）。**2026-09-23 に変えた・足した関数〈Q2・Q3・Q25・Q26〉も `bash supabase/tests/run.sh` で流して確かめた**（§11）。`month_summary()` は本体を置いたが端末からはまだ呼んでおらず、Supabase の本番プロジェクトでも動かしていない。
 - 実装に移すときは `supabase/migrations/` にこの SQL を分けて置き、この文書と同じ変更で直す。
@@ -31,6 +31,7 @@
 | `profiles` | 本人だけの状態（初回の済み・新着の判定） | S-02、S-10 | 本人が直接 |
 | `categories` | 15カテゴリ（固定。仕様書 §8） | S-11（記録タブ）、S-13、S-14、S-32 | 管理者（マイグレーション） |
 | `fixed_cost_templates` | 毎月の支払いのひな形 | S-30〜S-32 | 直接（追加・直す）＋ RPC（やめる・追加の取り消し） |
+| `fixed_cost_template_changes` | 毎月の支払いの変更の履歴（追加・直した・やめた。2026-10-03。仕様書 §12.1 Q31） | S-31、S-35 | トリガーだけ（端末は読むだけ。§2.9・§7） |
 | `expenses` | 記録（手入力と毎月の支払いの行） | S-10〜S-15、S-22 | 直接（足す・直す・消す）＋ RPC（行の生成・来月に回す） |
 | `month_contributions` | その月の各人の手取り・割合・出す額 | S-20、S-21、S-22 | RPC `decide_contributions`・`undo_decide_contributions` だけ（definer。直接の insert・update・delete は許さない） |
 | `month_settlements` | 月の精算（精算中・精算済み・やり直し中）と確定時の月の値 | S-20、赤い点 | RPC だけ |
@@ -140,7 +141,7 @@ create table public.fixed_cost_templates (
   paid_by      uuid references auth.users(id),              -- 払う人。null = 共用（既定）
   amount_kind  text not null check (amount_kind in ('fixed', 'variable')),  -- 毎月同じ ／ 金額待ち
   amount       integer check (amount between 1 and 9999999),
-  start_month  date not null check (start_month = date_trunc('month', start_month)::date),  -- この月の分から作る。追加した月。DB の今日で決める（端末の値は使わない。02 §10 C10。§7 のトリガー）
+  start_month  date not null check (start_month = date_trunc('month', start_month)::date),  -- この月の分から作る。S-32 で選んだ月（家計を作った月〜今月。範囲の外は今月。§7 のトリガー）
   end_month    date check (end_month = date_trunc('month', end_month)::date),              -- この月の分から作らない（支払いをやめる）
   created_by   uuid not null default auth.uid() references auth.users(id),
   created_at   timestamptz not null default now(),
@@ -154,7 +155,8 @@ create index fixed_cost_templates_household_idx on public.fixed_cost_templates (
 
 - ひな形を直しても、作ってある行は変わらない（行は作った時点の値を写して持つ。仕様書 §6.5）。だからひな形に版を持たせる必要はない。
 - 「支払いをやめる」は行を消さずに `end_month` を入れる（RPC `stop_template`。作ってある行は残る）。
-- `start_month` は追加した月。DB の今日で決める（端末の値は使わない。02 §10 C10）。端末が送っても、§7 のトリガーが `private.month_of(private.jst_today())` で上書きする。
+- `start_month` は S-32 で選んだ「何月分から」（2026-10-03 から。仕様書 §12.1 Q29）。端末の値を使うが、範囲の外（null・家計を作った月より前・今月より後）は §7 のトリガーが今月（`private.month_of(private.jst_today())`）にする。「今日」は DB の時計のまま（02 §10 C10）。前の月から始めるときは、その月から今月までにロック中の月があれば `month_locked` で止める（仕様書 §12.1 Q30。§7）。
+- ひな形を直しても版は持たないが、何を・何月分から・だれが変えたかは `fixed_cost_template_changes`（§2.9）に残す（S-35 で見るだけ。作る行の値はひな形のいまの値から写す。いままでどおり）。
 - 追加の元に戻す（`delete_template`）は、作った人が作った直後に、行が手つかずのときだけ（02 §2.5・§10 C13。§8.3）。
 
 ### 2.5 記録
@@ -314,8 +316,37 @@ create index settlement_events_month_idx on public.settlement_events (household_
 | `expenses_created_by_idx` | 手入力の記録の更新・削除のポリシー |
 | `expenses_fixed_period_key`（一意） | `ensure_month` の冪等性、S-15 の「先月 4,380」 |
 | `fixed_cost_templates_household_idx` | S-30・S-31、`ensure_month` |
+| `fixed_cost_template_changes_household_idx` | S-35（家計の履歴を新しい順に） |
+| `fixed_cost_template_changes_template_idx` | §7 のトリガー（そのひな形の一番新しい履歴。元に戻すの見分け） |
 | 各テーブルの主キー（`household_id, month, …`） | 月ごとの出す額・精算・チェック |
 | `settlement_checks_month_idx`、`settlement_events_month_idx` | 済んだ分の合計、操作の記録 |
+
+### 2.9 毎月の支払いの変更の履歴（2026-10-03。仕様書 §12.1 Q31）
+
+```sql
+create table public.fixed_cost_template_changes (
+  id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null references public.households(id),
+  template_id  uuid not null references public.fixed_cost_templates(id) on delete cascade,
+  change       text not null check (change in ('add', 'update', 'stop')),   -- 追加 ／ 直した ／ やめた
+  from_month   date not null check (from_month = date_trunc('month', from_month)::date),  -- 何月分から
+  before       jsonb,                                         -- 変更の前の値（add は null）
+  after        jsonb,                                         -- 変更の後の値（stop は null）
+  changed_by   uuid references auth.users(id),
+  changed_at   timestamptz not null default now(),
+  check ((change = 'add') = (before is null)),
+  check ((change = 'stop') = (after is null))
+);
+```
+
+- 値（`before`・`after`）の形は `private.template_values()`: `{name, category_id, paid_by, amount_kind, amount}`。`paid_by` は uuid（null = 共用）。
+- 書くのは §7 のトリガー `private.templates_after_write()` だけ。端末は読むだけ（§6）。
+  - 追加（insert）: `add`。`from_month` ＝ 開始月、`changed_by` ＝ 作った人。
+  - 値を直した（update）: `update`。`from_month` ＝ まだ作っていない最初の月（そのひな形の行の最後の対象月の翌月。行が無ければ開始月。`stop_template` の `end_month` と同じ決め方）。
+  - 支払いをやめた（`end_month` が null → 値）: `stop`。`from_month` ＝ `end_month`。
+  - **元に戻す**（トーストの［元に戻す］）は履歴を足さずに消す（本書の決め）: 直したのを戻す ＝ そのひな形の一番新しい `update` が、同じ人・1分以内で、ちょうど逆向き（`before` ＝ 新しい値、`after` ＝ 古い値）なら消す。やめるの取り消し（`end_month` → null）は一番新しい `stop` を消す。追加の取り消し（`delete_template`）はひな形ごと消えるので、`on delete cascade` で消える。
+- 0010 より前に作ったひな形には、0010 が `add`（開始月・作った人・作った時刻）を1件ずつ入れた。やめてあるものには `stop` も入れた（時刻は最後に直した時刻）。
+- 1家計で年に数十行。容量は気にしない。
 
 ---
 
@@ -331,7 +362,7 @@ create index settlement_events_month_idx on public.settlement_events (household_
   - 作るのは「対象月 ＝ その月」で、ひな形の `start_month ≦ 月 < end_month`、その月がロックされていないとき。
   - `insert … on conflict (fixed_cost_id, period_month) do nothing` なので、何度呼んでも、2台が同時に呼んでも1行だけ（冪等）。
   - `app_status()` がアプリを開いたとき・タブを選んだときに、家計を作った月から今月までの全部の月について呼ぶ（締め待ちの月をだれも開いていなくても、行が抜けない）。cron は使わない（仕様書 §6.5）。
-  - ひな形を追加したら、続けて `ensure_month(今月)` を呼んで今月分をすぐ作る（仕様書 S-32「9月分から記録します」）。
+  - ひな形を追加したら、続けて開始月から今月までの各月に `ensure_month(月)` を呼んで、その月の分をすぐ作る（仕様書 S-32「［9月分 ▾］から記録します」。2026-10-03 から開始月を選べる。呼ばなくても次の `app_status()` で作られる）。
 - 元の月の「電気代（8月分）　9月に回しました」は `period_month = 8月 and accounting_month <> 8月` の行として探す。
 
 ---
@@ -489,7 +520,8 @@ grant execute on function private.my_household_ids(), private.my_household_id(),
 | 手入力の記録 | 2人 | 2人（記録した人 = 自分） | 記録した人だけ | だれもできない | `expenses_select`・`expenses_insert_manual`・`expenses_update_manual`・`expenses_delete_manual` ＋ トリガー |
 | 毎月の支払いから作られた行 | 2人 | 自動 | 2人（金額・払った人・今月はなし。カテゴリは変えない） | だれも直せない | `expenses_update_fixed` ＋ 列の grant ＋ トリガー（カテゴリ・名前・日付・帰属月を守る）。足すのは `ensure_month` だけ。消すポリシーは無い |
 | その月の出す額 | 2人 | 2人（相手の分も） | 2人 | だれも直せない | `contributions_select`（読むだけ）。書き込みは RPC `decide_contributions`・`undo_decide_contributions`（definer。所属・月のロック・割合・決めた人を関数の中で決める。元に戻す値は `private.contribution_undo` の控えから取り、端末からは受け取らない）＋ トリガー。テーブルへの直接の insert・update・delete は grant しない |
-| 毎月の支払いのひな形 | 2人 | 2人 | 2人 | 作った行は変わらない | `templates_*`。やめる・追加の取り消しは RPC |
+| 毎月の支払いのひな形 | 2人 | 2人 | 2人 | 作った行は変わらない。**ロック中の月から始める追加はできない**（2026-10-03。§7） | `templates_*`。やめる・追加の取り消しは RPC |
+| 毎月の支払いの変更の履歴 | 2人 | 自動（ひな形を足す・直す・やめるとき） | だれも直せない（元に戻すときにトリガーが消すだけ） | — | `template_changes_select`（読むだけ）。書くのは §7 のトリガーだけ。insert・update・delete は grant しない（§6.3） |
 | 呼び名・色 | 2人 | — | 2人（相手の分も） | — | `members_select`。書き込みは RPC `update_member`（色の入れ替えを1つの取引で行うため）。相手の行を渡しても呼び名と色しか変えない |
 | 出す割合 | 2人（DB では `members_select` で2人とも読める） | — | **本人だけ**（2026-09-23。仕様書 §12.1 Q26） | 決めた月の出す額は変わらない（`month_contributions.contribution_rate` に控える） | `household_members.contribution_rate`。書き込みは RPC `update_contribution_rate`（definer。`where user_id = auth.uid()`）と、**本人の行のときだけ**割合に触れる `update_member`。テーブルへの update は grant しない（§6.3） |
 | 給料の入り先 | 2人（同上） | — | **本人だけ**（2026-09-23。仕様書 §12.1 Q25・Q26） | 決めた月の精算は変わらない（`month_contributions.salary_to_joint` に控える） | `household_members.salary_to_joint`。書き込みは RPC `update_salary_to_joint` だけ（definer。`where user_id = auth.uid()`）。`update_member` はこの列に触れない。テーブルへの update は grant しない（§6.3） |
@@ -605,11 +637,15 @@ grant select, insert, delete on public.expenses to authenticated;
 grant update (spent_on, category_id, amount, paid_by, memo, skipped) on public.expenses to authenticated;
 
 grant select on public.month_contributions to authenticated;   -- 書き込みは RPC だけ（割合・決めた人をサーバーで決めるため）
+
+-- 0010（2026-10-03）: 変更の履歴は読むだけ。Supabase は新しい表に既定で権限を出すので、先に全部外す
+revoke all on public.fixed_cost_template_changes from anon, authenticated;
+grant select on public.fixed_cost_template_changes to authenticated;
 ```
 
 - 列の grant は「その列を画面から直すことがある」ものだけ。帰属月・記録した人・金額を入れた人はトリガーが入れる。
 - `household_members` は `select` だけ（`update` を grant しない）。呼び名・色は RPC `update_member`、出す割合は `update_contribution_rate`（と本人の行のときの `update_member`）、給料の入り先は `update_salary_to_joint`、記録の既定の払った人は `update_default_payer` で書く。**`contribution_rate`・`salary_to_joint`・`default_payer` を「本人だけ」にできるのは、これらの RPC が `auth.uid()` の行しか直さないため**（列の grant やトリガーでは守らない。仕組みを1つにそろえる。§2.2・§6.1）。`month_contributions.salary_to_joint` も同じで、書き込みは `decide_contributions` だけ。
-- ひな形の insert は表単位の grant で、列を絞っていない（列の grant で `start_month` を外すと、端末が送ったときに permission denied になるため）。`start_month` と `created_at` は、端末が送っても §7 のトリガーが DB の値で上書きする。
+- ひな形の insert は表単位の grant で、列を絞っていない。`start_month` は端末の値を使う（2026-10-03 から）が、範囲の外は §7 のトリガーが今月にする。`created_at` は端末が送っても §7 のトリガーが DB の時刻で上書きする。
 - 毎月の支払いの行で直せない列（カテゴリ・日付・メモ）は、列の grant では通ってしまうので、トリガーで止める（§7）。
 
 ---
@@ -688,23 +724,111 @@ create trigger contributions_before_write
   before insert or update on public.month_contributions
   for each row execute function private.contributions_before_write();
 
--- 毎月の支払いのひな形: 追加した月（start_month）は DB の今日で決める（端末の値は使わない。02 §10 C10）。
+-- 毎月の支払いのひな形: 開始月（start_month）を確かめる（2026-10-03。0010 で置き換えた）。
+-- 範囲の外は今月（DB の今日の月）。前の月から始めるときは、今月までにロック中の月があれば止める。
 -- 作った時刻も DB の時刻にする（delete_template の「作ってから1分」を端末の値で延ばせないように）
 create or replace function private.templates_before_insert() returns trigger
 language plpgsql security definer set search_path = '' as $$
+declare
+  v_today_month date := private.month_of(private.jst_today());
+  v_first       date;
+  v_month       date;
+  v_locked      date;
 begin
-  new.start_month := private.month_of(private.jst_today());
-  new.created_at  := now();
+  select start_month into v_first from public.households where id = new.household_id;
+  if new.start_month is null
+     or new.start_month <> private.month_of(new.start_month)
+     or new.start_month < v_first
+     or new.start_month > v_today_month then
+    new.start_month := v_today_month;
+  end if;
+
+  -- 前の月から始めるときは、今月までにロック中の月が無いこと（確定との競合を防ぐため、月ごとに鍵を取る）
+  if new.start_month < v_today_month then
+    v_month := new.start_month;
+    while v_month <= v_today_month loop
+      perform pg_advisory_xact_lock_shared(private.month_lock_key(new.household_id, v_month));
+      if private.is_month_locked(new.household_id, v_month) then
+        v_locked := v_month;
+      end if;
+      v_month := (v_month + interval '1 month')::date;
+    end loop;
+    if v_locked is not null then
+      raise exception 'month_locked' using detail = v_locked::text;
+    end if;
+  end if;
+
+  new.created_at := now();   -- delete_template の「作ってから1分」を端末の値で延ばせないように
   return new;
 end $$;
 
 create trigger templates_before_insert
   before insert on public.fixed_cost_templates
   for each row execute function private.templates_before_insert();
+
+-- 毎月の支払いの変更の履歴を書く（2026-10-03。0010。§2.9）
+create or replace function private.templates_after_write() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_before jsonb;
+  v_after  jsonb;
+  v_from   date;
+  v_last   public.fixed_cost_template_changes;
+begin
+  if tg_op = 'INSERT' then
+    insert into public.fixed_cost_template_changes (household_id, template_id, change, from_month, before, after, changed_by, changed_at)
+    values (new.household_id, new.id, 'add', new.start_month, null, private.template_values(new), new.created_by, new.created_at);
+    return null;
+  end if;
+
+  -- 値を直した
+  v_before := private.template_values(old);
+  v_after  := private.template_values(new);
+  if v_before is distinct from v_after then
+    select * into v_last from public.fixed_cost_template_changes
+     where template_id = new.id
+     order by changed_at desc, id desc
+     limit 1;
+    if found and v_last.change = 'update'
+       and v_last.changed_by is not distinct from v_uid
+       and v_last.changed_at > now() - interval '1 minute'
+       and v_last.before = v_after and v_last.after = v_before then
+      delete from public.fixed_cost_template_changes where id = v_last.id;   -- 元に戻した
+    else
+      select coalesce((max(e.period_month) + interval '1 month')::date, new.start_month) into v_from
+        from public.expenses e where e.fixed_cost_id = new.id;
+      insert into public.fixed_cost_template_changes (household_id, template_id, change, from_month, before, after, changed_by)
+      values (new.household_id, new.id, 'update', v_from, v_before, v_after, v_uid);
+    end if;
+  end if;
+
+  -- 支払いをやめた・やめるを取り消した
+  if old.end_month is null and new.end_month is not null then
+    insert into public.fixed_cost_template_changes (household_id, template_id, change, from_month, before, after, changed_by)
+    values (new.household_id, new.id, 'stop', new.end_month, private.template_values(new), null, v_uid);
+  elsif old.end_month is not null and new.end_month is null then
+    delete from public.fixed_cost_template_changes
+     where id = (select c.id from public.fixed_cost_template_changes c
+                  where c.template_id = new.id and c.change = 'stop'
+                  order by c.changed_at desc, c.id desc limit 1);
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists templates_after_write on public.fixed_cost_templates;
+create trigger templates_after_write
+  after insert or update on public.fixed_cost_templates
+  for each row execute function private.templates_after_write();
+
+create trigger templates_after_write
+  after insert or update on public.fixed_cost_templates
+  for each row execute function private.templates_after_write();
 ```
 
 - RLS の `with check` は BEFORE トリガーの後の行で評価されるので、端末が帰属月をまちがえて送っても、トリガーが直した値で確かめる。
-- ひな形の `start_month` は、端末が `2026-09-01` を送っても、今日が 10/1 なら `2026-10-01` になる（前の月にさかのぼって行を作らない。§11）。
+- ひな形の `start_month` は、2026-10-03 から端末の値を使う（S-32 で選んだ「何月分から」。仕様書 §12.1 Q29）。null・家計を作った月より前（古い端末が送る `2000-01-01` も）・今月より後は今月にする。開始月が今月より前のときは、開始月から今月までの各月の鍵（shared）を取り、ロック中の月があれば `month_locked`（`detail` は一番新しいロック中の月）で止める（仕様書 §12.1 Q30）。開始月が今月なら今までどおり止めない（今月がロック中なら今月分の行が作られないだけ）。
+- 0010 より前（2026-09-22〜10-02）は、端末が `2026-09-01` を送っても今日の月で上書きしていた（前の月にさかのぼらない）。
 - ひな形の `updated_by`・`updated_at` も同じ形のトリガーで入れる（草案では省略）。
 
 ---
@@ -719,7 +843,7 @@ create trigger templates_before_insert
 |---|---|---|---|---|---|
 | `app_status()` | 起動・タブの切り替え（赤い点・お知らせ行・精算タブの既定の月） | なし | §8.2 | ○（`ensure_month` を含む） | definer |
 | `month_summary(p_month date, p_settle_mode boolean default false)` | S-20・S-21・S-22 | 月、画面が精算のモードか（保存しない。仕様書 §12.1 Q2） | §8.2 | ○（読むだけ） | definer（未実装。`month_live`・`s20_state` と下の表の値を組み立てる） |
-| `ensure_month(p_month date)` | S-10・S-20 を開いたとき、S-32 の追加の後 | 月 | 作った行の数 | ○ | definer |
+| `ensure_month(p_month date)` | S-10・S-20 を開いたとき、S-32 の追加の後（開始月から今月までの各月） | 月 | 作った行の数 | ○ | definer |
 | `decide_contributions(p_month date, p_net_incomes jsonb default null)` | S-20［この額で決める］（null）・S-21［決める］（`{"<user_id>": 手取り}`） | 月、手取り | `ok`（`prev`: `{decided_at}`〈書いた時刻だけ。元に戻すに渡す。書き込む前の行はサーバーが `private.contribution_undo` に控える〉）／ `blocked: locked` ／ `blocked: no_previous`（先月の値が無い人の `users`） | ○（null のときは決まっていない人だけ埋める。決めてある行の割合は変えない。**給料の入り先は `household_members` のいまの値で上書きする**。§12.1 Q27） | definer |
 | `undo_decide_contributions(p_month date, p_decided_at timestamptz)` | 出す額を決めたときのトーストの元に戻す | 月、`decide_contributions` が返した `prev.decided_at`（戻す値は受け取らない） | `ok` ／ `blocked: locked`（精算中・精算済み）／ `blocked: changed`（そのあと決め直された・もう戻した・決めたのが自分でない） | ○（2回目は `changed`） | definer |
 | `defer_expense(p_expense_id uuid, p_from_month date, p_undo boolean default false)` | S-15［来月に回す］とその元に戻す | 行、いまの帰属月 | `ok`（新しい帰属月）／ `already` ／ `blocked: not_pending・nothing_to_undo`。翌月がロック中なら例外 `month_locked` | ○（`p_from_month` が違えば何もしない） | definer |
@@ -733,7 +857,7 @@ create trigger templates_before_insert
 | `update_salary_to_joint(p_salary_to_joint boolean)` | S-33（自分の行の「給料の入り先」）とそのトーストの元に戻す | `true` ＝ 共用口座 ／ `false` ＝ 自分の口座 | `ok`（`salary_to_joint`。例外 `bad_salary_to_joint`） | ○ | definer。`where user_id = auth.uid()` で自分の行だけ |
 | `update_default_payer(p_default_payer text)` | S-30 の「記録の払った人」（とそのトーストの元に戻す） | `self` か `joint` | `ok`（`default_payer`） | ○ | definer |
 | `stop_template(p_template_id uuid, p_undo boolean default false)` | S-32［支払いをやめる］とその元に戻す | ひな形 | `ok`（`end_month`: トーストの「（10月から）」） | ○ | definer |
-| `delete_template(p_template_id uuid)` | S-32 の追加の元に戻す | ひな形 | `ok` ／ `blocked: not_found・too_late・locked_rows`（`too_late` = 作った人でない・作ってから1分を過ぎた・行が直された。02 §10 C13） | ○ | definer |
+| `delete_template(p_template_id uuid)` | S-32 の追加の元に戻す | ひな形 | `ok` ／ `blocked: not_found・too_late・locked_rows`（`too_late` = 作った人でない・作ってから1分を過ぎた・行が直された。02 §10 C13。2026-10-03 から、開始月より後の月に行があっても手つかずなら消せる〈開始月を前の月にすると、今月まで複数の月に行ができるため。0010〉） | ○ | definer |
 | `ping()` | 一時停止を防ぐ外部からの呼び出し（`docs/05_platform.md` §3.1） | なし | `1` | ○ | invoker（`anon` 可。テーブルに触れない） |
 
 給料の入り先の元に戻すは `update_salary_to_joint(前の値)`（トーストの「元に戻す」。値は2つしかないので、画面が持っていた前の値をそのまま渡す。§8.3）。記録の払った人の元に戻すは `update_default_payer(前の値)`（トーストの「元に戻す」。値は2つしかないので、画面が持っていた前の値をそのまま渡す）。チェックの元に戻すは `settle_set_check(…, false)`、（自動の）精算済みの元に戻すは最後のチェックを `false` にする。出す額を決めたのの元に戻すは `undo_decide_contributions(月, 決めたときに返った prev.decided_at)`（サーバーの控えから、新しく作った行は消し、上書きした行は手取り・**給料の入り先**・決めた人・時刻を前の値に戻す。割合はもともと動かないので戻さない。02 §2.5）。金額・払った人・今月はなしの元に戻すは、直す前の値で `expenses` を update し直す。
@@ -1445,8 +1569,7 @@ begin
      or v_t.created_at < now() - interval '1 minute'               -- 作ってから1分を過ぎた（6秒のトーストより十分長い）
      or exists (select 1 from public.expenses e                     -- 行が手つかずでない
                  where e.fixed_cost_id = v_t.id
-                   and (e.period_month <> v_t.start_month           -- 追加した月より後の月の行がある
-                     or e.accounting_month <> e.period_month        -- 来月に回した
+                   and (e.accounting_month <> e.period_month        -- 来月に回した（0010 で「追加した月より後の月の行がある」を外した）
                      or e.amount_set_by is not null                 -- 金額を入れた
                      or e.updated_at is not null                    -- 直した
                      or e.skipped)) then                            -- 今月はなしにした
@@ -1507,8 +1630,9 @@ grant execute on function public.ping() to anon, authenticated;
 | S-21 出す額 | `month_summary`（手取り・割合・その月の `salary_to_joint`・決めた人・先月の手取り）、`household_members`（**「給料は共用に入る」の添え字は、手取りを入れた人は `household_members.salary_to_joint`〈いまの設定〉、空の人はその月の値**。［決める］で保存される値を出すため。2026-09-23。仕様書 S-21・§12.1 Q27） | `decide_contributions(p_month, {user_id: 手取り})`、`undo_decide_contributions` |
 | S-22 1人ぶんの内訳 | `month_summary`（その人の数字とチェック。**`joint_salary` > 0 なら「共用に入った給料 − ◯」の行と注記**）、`expenses`（その月・`paid_by` = その人・金額あり・今月はなしでない）、`expenses`（その月・`paid_by` = その人・金額待ちで今月はなしでない。`estimate` の注記） | — |
 | S-30 設定 | `household_members`（呼び名・色・出す割合と、自分の `default_payer`。**`salary_to_joint` はここに出さない**〈行の右に出す値は1つだけ。仕様書 S-30〉）、`fixed_cost_templates`（`end_month` が null のもの〈やめていないもの〉の件数。仕様書 S-30） | `update_default_payer`（「記録の払った人」。その場で保存し、トーストの元に戻すは前の値でもう一度呼ぶ） |
-| S-31 毎月の支払い | `fixed_cost_templates`（`end_month` が null のもの。毎月同じの合計・金額待ちの件数・行） | — |
-| S-32 追加・直す | `categories`（`name_hints` で推測）、`fixed_cost_templates` | `fixed_cost_templates` insert → `ensure_month(今月)`、update、`stop_template`、`delete_template`（追加の元に戻す） |
+| S-31 毎月の支払い | `fixed_cost_templates`（`end_month` が null のもの。毎月同じの合計・金額待ちの件数・行）、`fixed_cost_template_changes`（1件以上あるときだけ［変更の履歴］を出す） | — |
+| S-32 追加・直す | `categories`（`name_hints` で推測）、`fixed_cost_templates`、`households`（`start_month`。開始月のマスの下限）、`month_settlements`（開始月のマスで、ロック中の月を含むかの案内） | `fixed_cost_templates` insert（`start_month` ＝ 選んだ月）→ 開始月から今月まで `ensure_month(月)`、update、`stop_template`、`delete_template`（追加の元に戻す）。履歴はトリガーが書く |
+| S-35 変更の履歴 | `fixed_cost_template_changes`（家計の全部。新しい順）、`household_members`（変えた人・払う人の呼び名） | — |
 | S-33 人の設定 | `household_members`（呼び名・色・出す割合・**給料の入り先**） | `update_member`（呼び名・色。自分の行なら割合も）、`update_contribution_rate`（自分の行の割合）、`update_salary_to_joint`（自分の行の給料の入り先。トーストの元に戻すは前の値でもう一度呼ぶ）。**相手の行では割合と給料の入り先を書かない**（読み取り専用。仕様書 §12.1 Q26） |
 | S-34 パスワード | — | `auth.updateUser({ password })` |
 
@@ -1530,7 +1654,7 @@ insert into public.categories (id, sort_order, name, icon, name_hints) values
   ('social',          7, '交際',     'gift',             '{}'),
   ('housing',         8, '住まい',   'building-2',       '{家賃,管理費}'),
   ('utilities',       9, '光熱費',   'lightbulb',        '{光熱,電気,ガス,水道}'),
-  ('telecom',        10, '通信',     'wifi',             '{携帯,スマホ,光,回線,Wi-Fi,NHK}'),
+  ('telecom',        10, '通信',     'wifi',             '{携帯,スマホ,光,回線,Wi-Fi,WiFi,NHK}'),  -- WiFi は 0010 で足した（2026-10-03）
   ('insurance',      11, '保険',     'shield',           '{保険}'),
   ('medical',        12, '医療',     'stethoscope',      '{病院,薬}'),
   ('big_purchase',   13, '大型出費', 'sofa',             '{家電,家具}'),
@@ -1593,9 +1717,11 @@ insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 - **ひな形の追加した月（§7 のトリガー。2026-09-22 の3回目。手順1〜4 のあとに流した）**: `kakeibo.today = 2026-10-01` で、まさととして `start_month = '2026-09-01'`（と `created_at = '2030-01-01'`）を送って insert しても、`start_month` は 2026-10-01、`created_at` は DB の時刻になった。`ensure_month('2026-09-01')` は 0件で9月に行ができず、`ensure_month('2026-10-01')` で10月分が1行できた。
 - **追加の元に戻す（`delete_template`。同じ回）**: 作った直後は `ok`（ひな形と行が消える。2回目は `blocked: not_found`）。次の場合は `blocked: too_late`: 2か月前のひな形（`created_at` を管理者で2か月前にし、8〜10月分の行がある）、金額を入れた行があるひな形（金額待ちの行に 6,200 を入れた。作った直後でも）、相手が作ったひな形（りさこが作ったものを、まさとが戻す。りさこ本人なら `ok`）、作ってから1分を過ぎたひな形（ほかは手つかず）。`locked_rows` の確かめは残したが、`too_late` を通ったあとは今月（進行中でロックされない）の行しか無いので、今の決まりでは起きない（守りとして残す）。
 
+- **開始月と変更の履歴（`0010_template_start_and_history.sql`。2026-10-03。仕様書 §12.1 Q29〜Q31）**: `bash supabase/tests/run.sh`（0001〜0010。`scenario.sql` の「毎月の支払いの開始月と変更の履歴」の節）で確かめた。(1) 8/1 に作った5件に `add` が1件ずつ、やめるを取り消すと `stop` が消える、追加を元に戻すと履歴も消える。(2) 光回線を 5,500 → 4,980 に直すと `update`（11月分から。10月分の行があるため）、すぐ 5,500 に戻すと `update` が消える（足さない）。(3) `authenticated` は履歴に insert できない（permission denied）。(4) 今日 10/3 で開始月 8月（精算済み）は `month_locked`、やり直し中の9月からは始められる、`2000-01-01` は今月（10月）になる。(5) 今日 11/2 で開始月 10月（未精算）の Wi-Fi を足し、`ensure_month` で10月分・11月分の2行ができ、手つかずなら `delete_template` で行も履歴も消える。既存のシナリオ（§9.6 の金額・RLS・ほかの RPC）もすべて通った。
+
 **再現の手順**
 
-**1コマンドで流せる**: `bash supabase/tests/run.sh`（`frontend` からは `pnpm test:sql`）で、`supabase/migrations/*.sql`（いまは **0001〜0009**）の適用 → 見本データ（仕様書 §9）→ §9.6 の値と §2.2 の権限の確認まで通る。要るのは Docker だけ（`KEEP=1` を付けるとコンテナが残る）。下の手順1〜5 は、その中身を手で追うときのもの。
+**1コマンドで流せる**: `bash supabase/tests/run.sh`（`frontend` からは `pnpm test:sql`）で、`supabase/migrations/*.sql`（いまは **0001〜0010**）の適用 → 見本データ（仕様書 §9）→ §9.6 の値と §2.2 の権限の確認まで通る。要るのは Docker だけ（`KEEP=1` を付けるとコンテナが残る）。下の手順1〜5 は、その中身を手で追うときのもの。
 
 この文書の SQL は `sql` のコードブロック（§2〜§10）を上から順に流したもの。ただし §10 の「家計と2人」の初期データは `<household_id>` などをダッシュボードで作った値に置き換えるものなので流さず、代わりに下の初期データを流す。下のテスト用の SQL は `pgsql` のブロックにしてあり、「`sql` のブロックを流す」には入らない。
 
@@ -1672,4 +1798,5 @@ insert into public.profiles (user_id) values ('<masato_uid>'), ('<risako_uid>');
 - ひな形の `updated_by` を入れるトリガー、`app_status()` の月の範囲の絞り込み（何年か使った後の速さ）。
   - S-04 と上部バーの ‹ › の下限（家計を作った月）は `months` から取らない形（`households.start_month` を読む。§9 の S-04・S-10・S-20 の行）にしてから絞り込む。
 - **`0009_salary_redecide.sql` の `blocked: locked`**（2026-09-23。仕様書 §12.1 Q27）。決め直し・元に戻す・見本データの値は `run.sh` で確かめ済み（上の「確かめたこと」の (1)〜(4)）。残っているのは、**精算中・精算済みの月で決め直そうとしたときの `blocked: locked`** を自動のシナリオでも確かめること（`decide_contributions` を `create or replace` するだけで、テーブル・制約・RLS は変えていない）。
+- **`0010_template_start_and_history.sql` を本番に流す**（2026-10-03。`docs/06_setup.md` §2）。
 - **`0008_salary_to_joint.sql` と `0009_salary_redecide.sql` を本番に流す**（`docs/06_setup.md` §2・§11）。0001〜0007 はもう本番に入っているので**書き換えない**。この文書の `create table` は「これから作る人」のための最終形で、**すでに作った家計に足すぶんは 0008 に書く**（列の `add column if not exists` と、関数の `create or replace`）。この2つが食い違ったら、この文書を正本にして 0008 を直す。

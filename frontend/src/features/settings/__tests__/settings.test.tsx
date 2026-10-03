@@ -13,7 +13,8 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AuthProvider } from '@/app/providers/auth-provider'
 import { ToastProvider } from '@/app/providers/toast-provider'
-import { createLocalRepository, type Repository, setRepository } from '@/data'
+import { createLocalRepository, type Repository, RepositoryError, setRepository } from '@/data'
+import type { ScenarioId } from '@/domain'
 import { system } from '@/theme'
 import { SettingsTab } from '../settings-tab'
 
@@ -33,16 +34,19 @@ function Wrapper({ children }: { children: ReactNode }) {
 type SetupOptions = {
   /** ログインする人（既定はまさと） */
   loginId?: 'masato' | 'risako'
-  /** 毎月の支払いを空にする（`empty` の状態を見る） */
+  /** 毎月の支払いを空にする（`empty` の状態を見る。変更の履歴も空にする） */
   noTemplates?: boolean
+  /** 見本データのシナリオ（既定は sep-open ＝ 9/22） */
+  scenario?: ScenarioId
 }
 
 async function setup(options: SetupOptions = {}): Promise<Repository> {
-  const repository = createLocalRepository()
+  const repository = createLocalRepository(options.scenario)
   await repository.auth.signIn(options.loginId ?? 'masato', 'pw')
   if (options.noTemplates) {
     const snapshot = await repository.loadSnapshot()
     snapshot.data.templates.length = 0
+    snapshot.data.templateChanges = []
   }
   setRepository(repository)
   render(
@@ -148,6 +152,43 @@ describe('S-31 毎月の支払い', () => {
     expect(screen.queryByText(/毎月 ¥/)).not.toBeInTheDocument()
   })
 
+  it('変更の履歴があるときだけ、［＋ 追加］の下に「変更の履歴」を出す', async () => {
+    await openS31()
+    expect(screen.getByRole('button', { name: '変更の履歴' })).toBeInTheDocument()
+  })
+
+  it('変更の履歴が無ければ「変更の履歴」を出さない', async () => {
+    await openS31({ noTemplates: true })
+    expect(screen.queryByRole('button', { name: '変更の履歴' })).not.toBeInTheDocument()
+  })
+
+  it('「変更の履歴」で S-35 が開き、新しい順に追加・直した・やめたが並ぶ', async () => {
+    const repository = await setup()
+    await repository.updateTemplate('t2', {
+      name: 'Wi-Fi',
+      cat: 'telecom',
+      payer: 'joint',
+      kind: 'fixed',
+      amount: 4980,
+    })
+    await repository.stopTemplate('t1')
+    await userEvent.click(screen.getByRole('button', { name: /毎月の支払い/ }))
+    await userEvent.click(await screen.findByRole('button', { name: '変更の履歴' }))
+    const dialog = await screen.findByRole('dialog', { name: '変更の履歴' })
+    expect(within(dialog).getByText('変更の履歴')).toBeInTheDocument()
+    expect(dialog.querySelector('[data-screen="S-35"]')).toHaveAttribute('data-state', 'normal')
+    const rows = within(dialog).getAllByRole('listitem')
+    expect(rows).toHaveLength(7)
+    // いちばん新しいのは「やめた」（名前はやめる前の名前）
+    expect(rows[0]).toHaveTextContent('家賃10月分からやめましたまさと 9/22')
+    expect(rows[1]).toHaveTextContent('Wi-Fi10月分から名前 光回線 → Wi-Fi、まさと → 共用、5,500円 → 4,980円まさと 9/22')
+    // 見本データのひな形の「追加」（金額待ちは「金額待ち」）
+    expect(rows.find((r) => r.textContent?.startsWith('電気代'))).toHaveTextContent(
+      '電気代8月分から追加 金額待ち・共用まさと 8/1'
+    )
+    expect(rows.at(-1)).toHaveTextContent('家賃8月分から追加 85,000円・共用まさと 8/1')
+  })
+
   it('‹ 設定 で S-30 に戻る', async () => {
     await openS31()
     await userEvent.click(screen.getByRole('button', { name: '設定' }))
@@ -164,13 +205,99 @@ describe('S-32 毎月の支払いを追加・直す', () => {
     return repository
   }
 
-  it('追加のシートは、払う人が共用・金額が「毎月同じ」で開き、注記は「9月分から記録します」', async () => {
+  it('追加のシートは、払う人が共用・金額が「毎月同じ」で開き、注記は「［9月分 ▾］から記録します」', async () => {
     await openAdd()
     const dialog = screen.getByRole('dialog', { name: '毎月の支払いを追加' })
     expect(within(dialog).getByRole('radio', { name: '共用' })).toBeChecked()
     expect(within(dialog).getByRole('radio', { name: '毎月同じ' })).toBeChecked()
-    expect(within(dialog).getByText('9月分から記録します')).toBeInTheDocument()
+    const chip = within(dialog).getByRole('button', { name: '記録を始める月 9月分（押すと選び直す）' })
+    expect(chip).toHaveTextContent('9月分')
+    expect(within(dialog).getByText('から記録します')).toBeInTheDocument()
     expect(within(dialog).getByText('選ぶ')).toBeInTheDocument()
+  })
+
+  it('記録を始める月を前の月にでき、保存するとその月から記録する（sep-redo ＝ 10/3）', async () => {
+    const repository = await setup({ scenario: 'sep-redo' })
+    await userEvent.click(screen.getByRole('button', { name: /毎月の支払い/ }))
+    await userEvent.click(screen.getAllByRole('button', { name: '追加' })[0] as HTMLElement)
+    const dialog = await screen.findByRole('dialog', { name: '毎月の支払いを追加' })
+    await userEvent.type(within(dialog).getByLabelText('名前'), '新聞')
+    await userEvent.click(within(dialog).getByRole('button', { name: '記録を始める月 10月分（押すと選び直す）' }))
+
+    // 中身が「何月分から」の月のマスに入れ替わる（シートは重ねない）
+    expect(within(dialog).getByText('何月分から')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('名前')).not.toBeInTheDocument()
+    // 選べるのは 家計を作った月（8月）〜 既定の開始月（今月＝10月）。範囲の外はボタンにしない
+    expect(within(dialog).getByRole('button', { name: '2026年8月' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '2026年10月 今月' })).toHaveAttribute('aria-current', 'true')
+    expect(within(dialog).queryByRole('button', { name: '2026年7月' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '2026年11月' })).not.toBeInTheDocument()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年9月' }))
+    // フォームに戻り、チップの文字が選んだ月になる（入力はそのまま）
+    expect(within(dialog).getByRole('button', { name: '記録を始める月 9月分（押すと選び直す）' })).toBeInTheDocument()
+    // フォーカスは開始月のチップに戻る（名前の欄に戻してキーボードを開かない）
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole('button', { name: '記録を始める月 9月分（押すと選び直す）' })
+    )
+    expect(within(dialog).getByLabelText('名前')).toHaveValue('新聞')
+
+    await userEvent.click(within(dialog).getByRole('button', { name: /カテゴリ/ }))
+    await userEvent.click(within(dialog).getByRole('button', { name: /その他/ }))
+    await userEvent.type(within(dialog).getByLabelText('毎月の金額'), '3000')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('新聞を追加しました')).toBeInTheDocument()
+    const snapshot = await repository.loadSnapshot()
+    const t = snapshot.data.templates.find((x) => x.name === '新聞')
+    expect(t?.from).toBe('2026-09')
+    const months = snapshot.data.expenses.filter((e) => e.tpl === t?.id).map((e) => e.labelMonth)
+    expect(months.sort()).toEqual(['2026-09', '2026-10'])
+  })
+
+  it('ロック中の月が入る月を押すと、選ばずにマスの下に案内を出す', async () => {
+    await openAdd()
+    const dialog = screen.getByRole('dialog', { name: '毎月の支払いを追加' })
+    await userEvent.click(within(dialog).getByRole('button', { name: '記録を始める月 9月分（押すと選び直す）' }))
+    // 8月は精算済み（§9.7）
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年8月' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('8月は精算済みです（先に精算をやり直します）')
+    // グリッドのまま（選んだことにしない）
+    expect(within(dialog).getByText('何月分から')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '2026年9月 今月' })).toHaveAttribute('aria-current', 'true')
+    // 選べる月を押すとフォームに戻り、1行は消える
+    await userEvent.click(within(dialog).getByRole('button', { name: '2026年9月 今月' }))
+    expect(within(dialog).getByRole('button', { name: '記録を始める月 9月分（押すと選び直す）' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('保存したときにサーバーがロック中を返したら、シートを閉じずに固定部分の直上に案内を出す', async () => {
+    const repository = await openAdd()
+    repository.addTemplate = async () => {
+      throw new RepositoryError('month_locked', 'その月は精算中です', '2026-09')
+    }
+    const dialog = screen.getByRole('dialog', { name: '毎月の支払いを追加' })
+    await userEvent.type(within(dialog).getByLabelText('名前'), 'ガス代')
+    await userEvent.type(within(dialog).getByLabelText('毎月の金額'), '6200')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('9月は精算中です（先に精算をやり直します）')
+    expect(screen.getByRole('dialog', { name: '毎月の支払いを追加' })).toBeInTheDocument()
+    expect(screen.queryByText('ガス代を追加しました')).not.toBeInTheDocument()
+  })
+
+  it('カテゴリが空のまま保存すると、カテゴリのチップにフォーカスを移す', async () => {
+    await openAdd()
+    const dialog = screen.getByRole('dialog', { name: '毎月の支払いを追加' })
+    await userEvent.type(within(dialog).getByLabelText('名前'), 'クリーニング')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(within(dialog).getByText('カテゴリを選んでください')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'カテゴリ 選ぶ' })).toHaveFocus()
+  })
+
+  it('名前に「Wifi」と入れると通信を推測する（ハイフンなし）', async () => {
+    await openAdd()
+    const dialog = screen.getByRole('dialog', { name: '毎月の支払いを追加' })
+    await userEvent.type(within(dialog).getByLabelText('名前'), 'Wifi')
+    expect(within(dialog).getByText('通信')).toBeInTheDocument()
   })
 
   it('名前を入れるとカテゴリを推測して入れる（§8。一番長い語で決める）', async () => {
@@ -270,6 +397,27 @@ describe('S-32 毎月の支払いを追加・直す', () => {
     // 押した時点で件数・一覧・毎月の合計から外す
     await waitFor(() => expect(screen.queryByRole('button', { name: /家賃/ })).not.toBeInTheDocument())
     expect(screen.getByText('毎月 ¥7,090')).toBeInTheDocument()
+  })
+
+  it('直したのをトーストの「元に戻す」で戻すと、その変更の履歴も消える', async () => {
+    const repository = await setup()
+    await userEvent.click(screen.getByRole('button', { name: /毎月の支払い/ }))
+    await userEvent.click(screen.getByRole('button', { name: /光回線/ }))
+    const dialog = await screen.findByRole('dialog', { name: '毎月の支払いを直す（光回線）' })
+    const amount = within(dialog).getByLabelText('毎月の金額')
+    await userEvent.clear(amount)
+    await userEvent.type(amount, '4980')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await screen.findByText('保存しました')
+    const edited = await repository.loadSnapshot()
+    expect(edited.data.templateChanges?.at(-1)).toMatchObject({ templateId: 't2', change: 'update', from: '2026-10' })
+
+    await userEvent.click(screen.getByRole('button', { name: '元に戻す' }))
+    await waitFor(async () => {
+      const snapshot = await repository.loadSnapshot()
+      expect(snapshot.data.templates.find((t) => t.id === 't2')?.amount).toBe(5500)
+      expect(snapshot.data.templateChanges?.some((c) => c.change === 'update')).toBe(false)
+    })
   })
 
   it('入力があるシートを閉じると「入力をやめました　元に戻す」が出る（§3.7）', async () => {

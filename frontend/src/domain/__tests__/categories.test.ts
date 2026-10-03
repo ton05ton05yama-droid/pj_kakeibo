@@ -40,6 +40,10 @@ describe('名前からカテゴリを推測する（§8 の決め方）', () => 
     ['火災保険', 'insurance'],
     ['病院', 'medical'],
     ['家電のローン', 'big_purchase'],
+    // ハイフンなしでも当たる（大文字・小文字は区別しない）
+    ['Wi-Fi', 'telecom'],
+    ['Wifi', 'telecom'],
+    ['WIFI', 'telecom'],
   ])('「%s」→ %s', (name, key) => {
     expect(guessCategory(name)).toBe(key)
   })

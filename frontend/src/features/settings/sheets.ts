@@ -2,7 +2,7 @@ import type { AmountKind, CategoryKey, FixedCostTemplate, MonthKey, Payer, Perso
 import { monthNumber } from '@/domain'
 
 /**
- * 設定タブのシート（S-03・S-32・S-33・S-34）の入力の状態。
+ * 設定タブのシート（S-03・S-32・S-33・S-34・S-35）の入力の状態。
  *
  * 入力は**タブ側が持つ**（閉じたときの「入力をやめました　元に戻す」で、同じ入力のまま開き直すため。§1.4・§3.7）。
  */
@@ -17,6 +17,11 @@ export interface SheetError {
 /** S-03 ホーム画面に追加（入力は無い） */
 export interface AddToHomeDraft {
   id: 'S-03'
+}
+
+/** S-35 変更の履歴（読み取り専用。入力は無い） */
+export interface TemplateHistoryDraft {
+  id: 'S-35'
 }
 
 /** S-32 毎月の支払いを追加・直す */
@@ -38,6 +43,12 @@ export interface TemplateDraft {
   amountBad: boolean
   /** カテゴリのグリッドを出している */
   grid: boolean
+  /** 記録を始める月（追加のときだけ。null = 既定〈今月。今月がロック中なら来月〉） */
+  from: MonthKey | null
+  /** 「何月分から」の月のマスを出している（追加のときだけ） */
+  monthGrid: boolean
+  /** 月のマスの下に出すその場の1行（ロック中の月を押した。§1.4） */
+  fromMsg: string | null
   err: SheetError | null
   dirty: boolean
 }
@@ -65,7 +76,7 @@ export interface PasswordDraft {
   dirty: boolean
 }
 
-export type SheetDraft = AddToHomeDraft | TemplateDraft | PersonDraft | PasswordDraft
+export type SheetDraft = AddToHomeDraft | TemplateDraft | PersonDraft | PasswordDraft | TemplateHistoryDraft
 
 /** 追加のシート（払う人の既定は共用、金額の既定は「毎月同じ」。§4 S-32） */
 export function newTemplateDraft(): TemplateDraft {
@@ -81,6 +92,9 @@ export function newTemplateDraft(): TemplateDraft {
     amount: '',
     amountBad: false,
     grid: false,
+    from: null,
+    monthGrid: false,
+    fromMsg: null,
     err: null,
     dirty: false,
   }
@@ -100,6 +114,9 @@ export function editTemplateDraft(t: FixedCostTemplate): TemplateDraft {
     amount: t.amount === null ? '' : String(t.amount),
     amountBad: false,
     grid: false,
+    from: null,
+    monthGrid: false,
+    fromMsg: null,
     err: null,
     dirty: false,
   }
@@ -124,7 +141,7 @@ export function passwordDraft(): PasswordDraft {
 
 /** 入力のあるシートか（閉じたときに「入力をやめました」を出すか） */
 export function isDirty(draft: SheetDraft): boolean {
-  return draft.id !== 'S-03' && draft.dirty
+  return draft.id !== 'S-03' && draft.id !== 'S-35' && draft.dirty
 }
 
 /** シートの読み上げ名（§4.0.3 の表） */
@@ -138,6 +155,8 @@ export function sheetLabel(draft: SheetDraft): string {
       return `人の設定（${draft.name}）`
     case 'S-34':
       return 'パスワードを変える'
+    case 'S-35':
+      return '変更の履歴'
   }
 }
 

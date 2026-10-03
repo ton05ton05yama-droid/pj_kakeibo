@@ -26,6 +26,8 @@ import type {
   PersonFlags,
   PersonKey,
   SettlementCheck,
+  TemplateChange,
+  TemplateValues,
 } from '../domain'
 import { computeJointSalary, createMonthSettlement, nextSeq } from '../domain'
 
@@ -112,6 +114,27 @@ export interface FixedCostTemplateRow {
   end_month: DbMonth | null
   created_by: string
   created_at: string
+}
+
+/** 履歴の before・after の jsonb（0010 の private.template_values） */
+export interface TemplateValuesJson {
+  name: string
+  category_id: string
+  paid_by: string | null
+  amount_kind: 'fixed' | 'variable'
+  amount: number | null
+}
+
+/** `fixed_cost_template_changes`（04 §2.9。トリガーだけが書く） */
+export interface FixedCostTemplateChangeRow {
+  id: string
+  template_id: string
+  change: 'add' | 'update' | 'stop'
+  from_month: DbMonth
+  before: TemplateValuesJson | null
+  after: TemplateValuesJson | null
+  changed_by: string | null
+  changed_at: string
 }
 
 export interface ExpenseRow {
@@ -236,6 +259,30 @@ export function toTemplate(row: FixedCostTemplateRow, persons: PersonMap): Fixed
     until: row.end_month === null ? null : toMonthKey(row.end_month),
     createdBy: persons.keyOf[row.created_by] ?? 'a',
     createdAt: toDateTimeKey(row.created_at),
+  }
+}
+
+function toTemplateValues(json: TemplateValuesJson | null, persons: PersonMap): TemplateValues | null {
+  if (json === null) return null
+  return {
+    name: json.name,
+    cat: json.category_id as CategoryKey,
+    payer: toPayer(json.paid_by, persons),
+    kind: json.amount_kind,
+    amount: json.amount,
+  }
+}
+
+export function toTemplateChange(row: FixedCostTemplateChangeRow, persons: PersonMap): TemplateChange {
+  return {
+    id: row.id,
+    templateId: row.template_id,
+    change: row.change,
+    from: toMonthKey(row.from_month),
+    before: toTemplateValues(row.before, persons),
+    after: toTemplateValues(row.after, persons),
+    by: row.changed_by === null ? null : (persons.keyOf[row.changed_by] ?? null),
+    at: toDateTimeKey(row.changed_at),
   }
 }
 

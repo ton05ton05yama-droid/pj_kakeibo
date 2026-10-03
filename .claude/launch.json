@@ -4,8 +4,30 @@
     {
       "name": "kakeibo",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["-C", "frontend", "dev"],
+      "runtimeArgs": [
+        "-C",
+        "frontend",
+        "dev"
+      ],
       "port": 5173
+    },
+    {
+      "name": "kakeibo-sample",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "VITE_AUTH_EMAIL_DOMAIN=",
+        "pnpm",
+        "-C",
+        "frontend",
+        "exec",
+        "vite",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
+      "port": 5174
     }
   ]
 }

@@ -7,9 +7,11 @@ import {
   BottomSheet,
   CategoryGrid,
   Chip,
+  DatePickerOverlay,
   Icon,
   InlineMessage,
   Keypad,
+  openDatePicker,
   PrimaryButton,
   Segmented,
   type SegmentedItem,
@@ -388,36 +390,22 @@ export function ExpenseSheet(props: ExpenseSheetProps) {
             onChange={(value) => {
               if (value === 'other') {
                 const input = document.getElementById('expense-date')
-                if (input instanceof HTMLInputElement) {
-                  try {
-                    input.showPicker()
-                  } catch {
-                    input.focus()
-                  }
-                }
+                openDatePicker(input instanceof HTMLInputElement ? input : null)
                 setDraft((prev) => ({ ...prev, dateSel: 'other' }))
                 return
               }
               setDraft((prev) => ({ ...prev, dateSel: value }))
             }}
           />
-          {/* 端末の日付選択（見た目は出さない。セグメントの「ほかの日」から開く） */}
-          <InputBox
-            type='date'
+          {/* 端末の日付選択（見た目は出さない。「ほかの日」のマスに重ね、指で押したときは直接受ける） */}
+          <DatePickerOverlay
             id='expense-date'
-            tabIndex={-1}
-            aria-hidden
             min={`${d.household.createdMonth}-01`}
             max={today}
             value={draft.otherDate}
-            onChange={(event) => setDraft((prev) => ({ ...prev, dateSel: 'other', otherDate: event.target.value }))}
-            position='absolute'
-            right='0'
-            bottom='0'
-            w='1px'
-            h='1px'
-            opacity='0'
-            pointerEvents='none'
+            onOpen={() => setDraft((prev) => ({ ...prev, dateSel: 'other' }))}
+            onChange={(value) => setDraft((prev) => ({ ...prev, dateSel: 'other', otherDate: value }))}
+            onReset={() => setDraft((prev) => ({ ...prev, dateSel: 'today' }))}
           />
         </Box>
         {payerSegment}

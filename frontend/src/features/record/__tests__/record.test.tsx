@@ -235,6 +235,18 @@ describe('S-12 記録（いくら？）', () => {
     expect(await screen.findByRole('radio', { name: '9/19（土）' })).toBeChecked()
   })
 
+  it('日付選択の「リセット」で今日に戻る（§12.1 Q28）', async () => {
+    await openRecordTab()
+    await userEvent.click(screen.getByRole('button', { name: '食料品' }))
+    await screen.findByRole('dialog')
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement
+    fireEvent.change(dateInput, { target: { value: '2026-09-19' } })
+    expect(await screen.findByRole('radio', { name: '9/19（土）' })).toBeChecked()
+    fireEvent.change(dateInput, { target: { value: '' } })
+    expect(await screen.findByRole('radio', { name: '今日' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'ほかの日' })).not.toBeChecked()
+  })
+
   it('今日以外の日付で記録すると、トーストに日付が入る（§1.4）', async () => {
     await openRecordTab()
     await userEvent.click(screen.getByRole('button', { name: '食料品' }))

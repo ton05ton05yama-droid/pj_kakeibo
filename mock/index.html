@@ -269,6 +269,10 @@ p, h1, h2, h3 { margin: 0; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
 .field > label, .flab { font-size: var(--fs-body-sm); font-weight: 600; color: var(--text-sub); line-height: var(--lh-ui); }
 .field > .err, .field > .inl { margin-top: 0; }
+/* S-32 は欄と欄の間を 8px に詰める（開始月の行を足しても 375×548 の高いシート 524px に入れるため。§4 S-32 の縦の寸法） */
+[data-screen="S-32"] > .field { margin-top: 8px; }
+/* S-32 追加のときの開始月の行「［9月分 ▾］から記録します」。チップのタップ領域 44px がそのまま行の高さ */
+.s32-from { display: flex; align-items: center; min-height: 44px; margin-top: 4px; font-size: var(--fs-md); color: var(--text-sub); font-weight: 500; line-height: var(--lh-ui); }
 .inp { height: var(--control-h); width: 100%; padding: 0 12px; border-radius: var(--radius-control); background: var(--bg-input); border: 1px solid var(--border-strong); color: var(--text-main); font-size: var(--fs-input); font-weight: 500; }
 .inp::placeholder { color: var(--text-placeholder); }
 .inp:focus { outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: transparent; }
@@ -352,6 +356,16 @@ p, h1, h2, h3 { margin: 0; }
    押せないボタンは作らない（P7）ので、セグメントや欄ではなく値の表示にする */
 .rov { min-height: 44px; display: flex; align-items: center; font-size: var(--fs-lg); font-weight: 600; color: var(--text-main); line-height: var(--lh-ui); }
 .ro-note { font-size: var(--fs-body-sm); color: var(--text-sub); font-weight: 500; line-height: var(--lh-ui); margin-top: 8px; }
+/* S-35 変更の履歴の行（押せない）。1段目 アイコン＋名前 16px・右に「◯月分から」14px ／ 2段目 13px ／ 3段目 12px */
+.hist { list-style: none; margin: 0; padding: 0; }
+.hist > li { padding: 10px 0; }
+.hist > li + li { border-top: 1px solid var(--border); }
+.hist-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-lg); font-weight: 500; line-height: var(--lh-ui); }
+.hist-h .ic { color: var(--text-sub); }
+.hist-h .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-from { font-size: var(--fs-md); color: var(--text-sub); white-space: nowrap; }
+.hist-what { font-size: var(--fs-body-sm); color: var(--text-sub); font-weight: 500; line-height: var(--lh-ui); margin-top: 2px; padding-left: 28px; }
+.hist-who { font-size: var(--fs-sm); color: var(--text-muted); font-weight: 500; line-height: var(--lh-ui); margin-top: 2px; padding-left: 28px; }
 .colors { display: flex; gap: 16px; }
 .colorbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; border: 2px solid transparent; }
 .colorbtn.on { border-color: var(--text-main); }
@@ -501,7 +515,7 @@ if (typeof document !== 'undefined') document.documentElement.lang = 'ja';
    JS の並び（仕様を変えたら該当の番号へ）
    1 DATA（§9 見本データ） 2 CALC（§6.2 計算のきまり・純粋関数） 3 MODEL（データを変える操作）
    4 SCENARIOS（§9.5・§10.2） 5 VERIFY（§9.6 検算） 6 STATE 7 UTIL（書式・部品）
-   8 画面ごとの render（S-01〜S-34） 9 ACTIONS（イベント） 10 MOCK（§10） 11 起動
+   8 画面ごとの render（S-01〜S-35） 9 ACTIONS（イベント） 10 MOCK（§10） 11 起動
    ===================================================================== */
 
 /* ---------------------------------------------------------------------
@@ -519,7 +533,7 @@ const CATEGORIES = [
   { key: 'social',          name: '交際',     icon: 'gift',             guess: [] },
   { key: 'housing',         name: '住まい',   icon: 'building-2',       guess: ['家賃', '管理費'] },
   { key: 'utilities',       name: '光熱費',   icon: 'lightbulb',        guess: ['電気', 'ガス', '水道', '光熱'] },
-  { key: 'telecom',         name: '通信',     icon: 'wifi',             guess: ['携帯', 'スマホ', '光', '回線', 'Wi-Fi', 'NHK'] },
+  { key: 'telecom',         name: '通信',     icon: 'wifi',             guess: ['携帯', 'スマホ', '光', '回線', 'Wi-Fi', 'WiFi', 'NHK'] },
   { key: 'insurance',       name: '保険',     icon: 'shield',           guess: ['保険'] },
   { key: 'medical',         name: '医療',     icon: 'stethoscope',      guess: ['病院', '薬'] },
   { key: 'big_purchase',    name: '大型出費', icon: 'sofa',             guess: ['家電', '家具'] },
@@ -890,12 +904,20 @@ const SCENARIOS = [
     apply: (d) => { MODEL.reopenMonth(d, '2026-09', 'a', '2026-10-03T20:05'); d.expenses.push(MODEL.row(DATA.s28)); } },
 ];
 
+/* ひな形の値（変更の履歴〈S-35〉の前と後に残す5つ）。並びは 名前・カテゴリ・払う人・金額（金額の種類と金額） */
+const tplValues = (t) => ({ name: t.name, cat: t.cat, payer: t.payer, kind: t.kind, amount: t.amount });
+/* ひな形の変更の履歴（S-35）。見本データ（§9）には無いので、読み込むときにひな形から「追加」を1件ずつ作る
+   （from = ひな形の開始月、by = 作った人、at = 作った日時。見本のひな形は 2026-08-01 に作ったので、作った日時が無ければ開始月の1日）。
+   change: 'add' | 'update' | 'stop'。before は add のとき null、after は stop のとき null */
+const initialTplChanges = (templates) => templates.map((t, i) => ({ id: 'hs' + (i + 1), tpl: t.id, change: 'add', from: t.from, before: null, after: tplValues(t), by: t.createdBy, at: t.createdAt || `${t.from}-01T00:00` }));
+
 /* 見本データからシナリオ sc の時点のデータを作る（純粋: 毎回新しいオブジェクトを返す） */
 function buildScenario(sc) {
   const d = {
     household: { ...DATA.household },
     people: JSON.parse(JSON.stringify(DATA.people)),
     templates: JSON.parse(JSON.stringify(DATA.templates)),
+    tplChanges: initialTplChanges(DATA.templates),
     contributions: JSON.parse(JSON.stringify(DATA.contributions)),
     expenses: [...DATA.aug.map(MODEL.row), ...DATA.sepOpen.map(MODEL.row)],
     settlements: {},
@@ -941,7 +963,7 @@ const CASES = [
 /* 合成ケースのデータ: 9月を「締め待ち・金額待ちなし」にして、人ごとの立替を1行ずつにまとめる */
 function buildCaseData(c) {
   const base = buildScenario('sep-open').data;
-  const d = { household: base.household, people: base.people, templates: base.templates, settlements: { '2026-08': base.settlements['2026-08'] }, contributions: { '2026-08': base.contributions['2026-08'] } };
+  const d = { household: base.household, people: base.people, templates: base.templates, tplChanges: base.tplChanges, settlements: { '2026-08': base.settlements['2026-08'] }, contributions: { '2026-08': base.contributions['2026-08'] } };
   const mk = (p) => ({ net: c.net[p], ratePct: 40, amount: CALC.contributionOf(c.net[p], 40), salaryToJoint: !!(c.salaryToJoint || {})[p], by: p, at: '2026-09-01' });
   d.contributions['2026-09'] = { a: mk('a'), b: mk('b') };
   d.expenses = base.expenses.filter((e) => e.month === '2026-08');
@@ -1290,7 +1312,7 @@ const offlineLine = () => (S.offline ? `<div class="offline">${ic('cloud-off', 1
    8. 画面ごとの render（HTML 文字列を返す。ルート要素に data-screen / data-state）
    --------------------------------------------------------------------- */
 /* 「高い」シート（§4.0.3）: calc(100dvh − max(24px, 上の safe-area ＋ 8px)) まで使ってよい（375×548 で 524px） */
-const TALL = new Set(['S-12', 'S-14', 'S-15', 'S-21', 'S-32']);
+const TALL = new Set(['S-12', 'S-14', 'S-15', 'S-21', 'S-32', 'S-35']);
 const SHEETS = {};
 /* シートの読み上げ名（画面IDは使わない。§4.0.3） */
 function sheetLabel(sh) {
@@ -1309,6 +1331,7 @@ function sheetLabel(sh) {
     case 'S-32': return sh.tplId ? `毎月の支払いを直す（${sh.origName}）` : '毎月の支払いを追加';
     case 'S-33': return `人の設定（${whoName(sh.p)}）`;
     case 'S-34': return 'パスワードを変える';
+    case 'S-35': return '変更の履歴';
     default: return '';
   }
 }
@@ -1368,10 +1391,14 @@ SHEETS['S-03'] = () => `<div class="sh-root" data-screen="S-03" data-state="norm
    年の切替はシートの中の状態（開いたときは見ている月の年）。マスを押すと、そのタブの月を変えてシートを閉じる。
    金額・精算の状態はマスに出さない（選ぶ前に読む量を増やさない。§11）。
    家計を作る前の月・今月より先の月はボタンにしない（P7）。今月（JST）にだけ「今月」を添える（精算タブの既定の月は今月とは限らないため、目印は「今月」だけ） */
-SHEETS['S-04'] = (sh) => {
-  const cur = S.month[sh.tab];                                   /* いま見ている月 */
-  const first = S.data.household.createdMonth, last = curMonth();
-  const y = sh.year;
+SHEETS['S-04'] = (sh) => `<div class="sh-root" data-screen="S-04" data-state="normal">
+  ${monthPicker({ year: sh.year, first: S.data.household.createdMonth, last: curMonth(), cur: S.month[sh.tab], act: 'pickMonth', yearAct: 's04Year' })}
+</div>`;
+/* 年の行（‹ 2026 ›）と12か月のマス。S-04 と S-32 の「何月分から」で使う同じ部品（§7.5）。
+   year = 出す年、first〜last = 選べる月（範囲の外はボタンにしない。P7）、cur = 選択中の月（青い縁）、act = マスの操作、yearAct = 年の ‹ › の操作。
+   今月（JST）のマスにだけ「今月」を添える */
+function monthPicker({ year: y, first, last, cur, act, yearAct }) {
+  const now = curMonth();
   const prevOk = y - 1 >= +first.slice(0, 4), nextOk = y + 1 <= +last.slice(0, 4);
   const cells = [];
   for (let i = 1; i <= 12; i++) {
@@ -1379,17 +1406,15 @@ SHEETS['S-04'] = (sh) => {
     if (m < first || m > last) { cells.push(`<span class="mcell off">${i}月</span>`); continue; }
     const on = m === cur;
     /* 読み上げ名は「2026年8月」。今月のマスだけ「2026年9月 今月」（§4.0.3 の表・S-04） */
-    cells.push(`<button type="button" class="mcell ${on ? 'on' : ''}" data-act="pickMonth" data-arg="${m}" aria-label="${mLabel(m)}${m === last ? ' 今月' : ''}"${on ? ' aria-current="true"' : ''}>${i}月${m === last ? '<small>今月</small>' : ''}</button>`);
+    cells.push(`<button type="button" class="mcell ${on ? 'on' : ''}" data-act="${act}" data-arg="${m}" aria-label="${mLabel(m)}${m === now ? ' 今月' : ''}"${on ? ' aria-current="true"' : ''}>${i}月${m === now ? '<small>今月</small>' : ''}</button>`);
   }
-  return `<div class="sh-root" data-screen="S-04" data-state="normal">
-  <div class="yearbar"${prevOk || nextOk ? ' data-g="year"' : ''}>
-    ${prevOk ? `<button type="button" class="iconbtn" data-act="s04Year" data-arg="-1" aria-label="前の年">${ic('chevron-left', 20)}</button>` : '<span></span>'}
+  return `<div class="yearbar"${prevOk || nextOk ? ' data-g="year"' : ''}>
+    ${prevOk ? `<button type="button" class="iconbtn" data-act="${yearAct}" data-arg="-1" aria-label="前の年">${ic('chevron-left', 20)}</button>` : '<span></span>'}
     <span class="y">${y}</span>
-    ${nextOk ? `<button type="button" class="iconbtn" data-act="s04Year" data-arg="1" aria-label="次の年">${ic('chevron-right', 20)}</button>` : '<span></span>'}
+    ${nextOk ? `<button type="button" class="iconbtn" data-act="${yearAct}" data-arg="1" aria-label="次の年">${ic('chevron-right', 20)}</button>` : '<span></span>'}
   </div>
-  <div class="mgrid" data-g="months">${cells.join('')}</div>
-</div>`;
-};
+  <div class="mgrid" data-g="months">${cells.join('')}</div>`;
+}
 
 /* ===== 支出タブ（S-10〜S-15） ===== */
 
@@ -1859,11 +1884,14 @@ function renderS31() {
   const fixed = act.filter((t) => t.kind === 'fixed').sort((x, y) => y.amount - x.amount);
   const vari = act.filter((t) => t.kind === 'variable');
   const fsum = fixed.reduce((s, t) => s + t.amount, 0);
+  /* 文字ボタン「変更の履歴」→ S-35。履歴が1件以上あるときだけ（条件つき (+1)）。［＋ 追加］の下に中央寄せ */
+  const hasHist = S.data.tplChanges.length > 0;
+  const histBtn = hasHist ? `<div style="display:flex;justify-content:center;margin:8px 0 24px"><button type="button" class="btn-text" data-act="openS35" data-g="history">変更の履歴</button></div>` : '';
   let h = `<div class="screen" data-screen="S-31" data-state="${act.length ? 'normal' : 'empty'}">
   <header class="appbar left"><button type="button" class="backbtn" data-act="backToS30" data-g="back">${ic('chevron-left')}設定</button><h1 class="appbar-plain" tabindex="-1">毎月の支払い</h1><span></span></header>${offlineLine()}`;
   if (!act.length) {
     h += `<p class="msg" style="margin-top:24px">毎月の支払いを入れると、毎月自動で記録されます</p>
-    <div style="margin-top:16px"><button type="button" class="btn-fill" data-act="openS32" data-g="add">${ic('plus')}追加</button></div>`;
+    <div style="margin-top:16px"><button type="button" class="btn-fill" data-act="openS32" data-g="add">${ic('plus')}追加</button></div>${histBtn}`;
     return h + `</div>`;
   }
   h += `<p class="total" data-big style="margin-top:8px">毎月 ${yen(fsum)}</p>`;
@@ -1872,18 +1900,23 @@ function renderS31() {
     ${ic(catOf(t.cat).icon)}<span class="grow">${esc(t.name)}</span>
     <span class="val" style="display:inline-flex;align-items:center;gap:4px">${avatar(t.payer, 20, true)}${esc(whoName(t.payer))}</span>
     <span class="num" style="min-width:76px;text-align:right;font-weight:600">${t.kind === 'fixed' ? fmt(t.amount) : '<span class="dash-tag">金額待ち</span>'}</span></button>`).join('') + `</div>`;
-  h += `<div class="sgroup" style="margin:8px 0 24px" data-g="add"><button type="button" class="srow" data-act="openS32" style="color:var(--text-accent);font-weight:600">${ic('plus')}追加</button></div>`;
+  h += `<div class="sgroup" style="margin:8px 0 ${hasHist ? 0 : 24}px" data-g="add"><button type="button" class="srow" data-act="openS32" style="color:var(--text-accent);font-weight:600">${ic('plus')}追加</button></div>${histBtn}`;
   return h + `</div>`;
 }
 
 /* S-32 毎月の支払いを追加・直す（§4 S-32・§6.5）。状態 empty（追加）/ normal（直す）/ action */
 /* 見出しは置かない（名前の欄が一番大きく見せるもの）。シートの読み上げ名は sheetLabel()。高いシート（TALL）。
-   直すときは下端を 左「支払いをやめる」（赤い文字）・右［保存］にする（S-14 と同じ形）。欄に結びつかない1行（オンラインで直せます）は固定部分の直上 */
+   直すときは下端を 左「支払いをやめる」（赤い文字）・右［保存］にする（S-14 と同じ形）。欄に結びつかない1行（オンラインで直せます）は固定部分の直上。
+   追加のときは注記の代わりに開始月の行「［9月分 ▾］から記録します」（間 4 ＋ 44px ＋ 間 0 で固定部分）。直すときは今までどおり「変更は10月分から」 */
 SHEETS['S-32'] = (sh) => {
   const editing = !!sh.tplId;
   const st = sh.err ? 'action' : editing ? 'normal' : 'empty';
   if (sh.grid) return `<div class="sh-root" data-screen="S-32" data-state="${st}"><h2 class="sh-title" style="margin:4px 0 12px">カテゴリ</h2>${catGrid('s32Cat', sh.cat)}</div>`;
-  const fromM = isLocked(curMonth()) ? CALC.addMonth(curMonth(), 1) : curMonth();
+  /* 何月分から（追加のときだけ）: 中身を月のマスに入れ替える（シートは重ねない。§4.0.3・B8）。選べる月は 家計を作った月 〜 既定の開始月。
+     押した月から今月までにロック中の月があれば、選ばずにマスの下にその場の1行（一番新しいロック中の月） */
+  if (sh.mgrid) return `<div class="sh-root" data-screen="S-32" data-state="${st}"><h2 class="sh-title" style="margin:4px 0 4px">何月分から</h2>
+  ${monthPicker({ year: sh.fromYear, first: S.data.household.createdMonth, last: s32DefaultFrom(), cur: sh.from, act: 's32Month', yearAct: 's32Year' })}
+  ${sh.fromMsg ? `<p class="inl" role="alert" data-errline style="margin-top:8px">${esc(sh.fromMsg)}</p>` : ''}</div>`;
   const effM = CALC.addMonth(curMonth(), 1);
   /* 金額の欄は、受け付けない値が入っているあいだも赤い枠（amountBad） */
   const isBad = (k) => !!(sh.err && sh.err.field === k) || (k === 'amount' && !!sh.amountBad);
@@ -1895,15 +1928,45 @@ SHEETS['S-32'] = (sh) => {
   <div class="field"><span class="flab" id="lab-tplpayer">払う人</span>${payerSeg(sh.payer, 's32Payer', 'lab-tplpayer')}</div>
   <div class="field"><span class="flab" id="lab-tplkind">金額</span>${textSeg('金額', [['fixed', '毎月同じ'], ['variable', '金額待ち']], sh.kind, 's32Kind', 'tpl-kind', 'kind')}
     ${sh.kind === 'fixed' ? `<div class="pre" data-g="amount" style="margin-top:8px"><span>¥</span><input class="inp num ${bad('amount')}" id="tpl-amount" inputmode="numeric" pattern="[0-9]*" value="${esc(sh.amount)}" data-in="tplAmount" aria-label="毎月の金額" autocomplete="off"${inv('amount')}></div>` : ''}${errLine(sh, 'amount')}</div>
-  <p class="note" style="margin-top:8px">${editing ? `変更は${mShort(effM)}分から` : `${mShort(fromM)}分から記録します`}</p>
+  ${editing ? `<p class="note" style="margin-top:8px">変更は${mShort(effM)}分から</p>` : `<div class="s32-from">${s32FromChip(sh)}<span>から記録します</span></div>`}
   ${errLine(sh, null)}
-  <div class="sh-foot${editing ? ' split' : ''}" style="margin-top:8px">${editing ? `<button type="button" class="btn-text danger" data-act="s32Stop" data-g="stop">支払いをやめる</button>` : ''}<button type="button" class="btn-fill" data-act="s32Save" data-g="save">保存</button></div>
+  <div class="sh-foot${editing ? ' split' : ''}" style="margin-top:${editing ? 8 : 0}px">${editing ? `<button type="button" class="btn-text danger" data-act="s32Stop" data-g="stop">支払いをやめる</button>` : ''}<button type="button" class="btn-fill" data-act="s32Save" data-g="save">保存</button></div>
 </div>`;
 };
+/* 開始月のチップ［9月分 ▾］（追加のとき）。押すと中身が「何月分から」の月のマスに入れ替わる */
+function s32FromChip(sh) {
+  return `<button type="button" class="chip" id="tpl-from" data-act="s32From" data-g="from" aria-label="記録を始める月 ${mShort(sh.from)}分（押すと選び直す）"><span class="chip-in" style="color:var(--text-main)">${mShort(sh.from)}分${ic('chevron-down', 16)}</span></button>`;
+}
 function s32CatChip(sh) {
   const c = sh.cat ? catOf(sh.cat) : null;
   return `<button type="button" class="chip" id="tpl-cat" data-act="s32Grid" aria-labelledby="lab-tplcat tpl-cat"><span class="chip-in" style="color:var(--text-main);${sh.err && sh.err.field === 'cat' ? 'outline:1px solid var(--border-danger)' : ''}">${c ? ic(c.icon, 16) + c.name : '選ぶ'}${ic('chevron-down', 16)}</span></button>`;
 }
+
+/* S-35 変更の履歴（§4 S-35）。S-31 の「変更の履歴」から開く高いシート。読み取り専用（行は押せない）。状態 normal だけ
+   （履歴が0件のときは S-31 に入口を出さない）。並びは新しい順。1行: 1段目 カテゴリのアイコン＋名前（変更の後の名前。やめたときは前の名前）・右に「10月分から」
+   ／ 2段目 追加「追加 5,500円・まさと」・直した「名前 光回線 → Wi-Fi、通信 → エンタメ」・やめた「やめました」 ／ 3段目 変えた人と日付「まさと 10/3」 */
+const tplAmountText = (v) => (v.kind === 'variable' || v.amount == null ? '金額待ち' : `${fmt(v.amount)}円`);
+function histWhat(h) {
+  if (h.change === 'add') return `追加 ${tplAmountText(h.after)}・${whoName(h.after.payer)}`;
+  if (h.change === 'stop') return 'やめました';
+  const b = h.before, a = h.after, parts = [];
+  if (b.name !== a.name) parts.push(`名前 ${b.name} → ${a.name}`);
+  if (b.cat !== a.cat) parts.push(`${catOf(b.cat).name} → ${catOf(a.cat).name}`);
+  if (b.payer !== a.payer) parts.push(`${whoName(b.payer)} → ${whoName(a.payer)}`);
+  if (tplAmountText(b) !== tplAmountText(a)) parts.push(`${tplAmountText(b)} → ${tplAmountText(a)}`);
+  return parts.join('、');
+}
+SHEETS['S-35'] = () => {
+  const list = S.data.tplChanges.map((h, i) => ({ h, i })).sort((x, y) => y.h.at.localeCompare(x.h.at) || y.i - x.i).map((x) => x.h);
+  if (!list.length) return '';   /* 空を返すと renderSheet が閉じる */
+  return `<div class="sh-root" data-screen="S-35" data-state="normal">
+  <h2 class="sh-title" style="margin:4px 0 4px">変更の履歴</h2>
+  <ul class="hist">${list.map((h) => { const v = h.after || h.before; return `<li>
+    <div class="hist-h">${ic(catOf(v.cat).icon, 20)}<span class="grow">${esc(v.name)}</span><span class="hist-from">${mShort(h.from)}分から</span></div>
+    <p class="hist-what">${esc(histWhat(h))}</p>
+    <p class="hist-who">${esc(whoName(h.by))} ${md(h.at)}</p></li>`; }).join('')}</ul>
+</div>`;
+};
 
 /* S-33 人の設定（§4 S-33）。相手の行も開ける。状態 normal（自分の行）/ partner（相手の行）/ action。
    呼び名と色は2人とも変えられる（相手の打ち間違いを直せるように）。
@@ -2020,8 +2083,8 @@ function focusSheetStart() {
   const el = $('#sheet');
   const net = S.sheet && S.sheet.id === 'S-21' ? document.getElementById('net-' + S.sheet.target) : null;
   if (net && el.contains(net)) { el.removeAttribute('tabindex'); net.focus({ preventScroll: true }); return; }
-  /* S-04 は、いま見ている月のマスへ（その年に無いときは、その年で選べる最初のマス）。§4.0.3・S-04 */
-  const mcell = S.sheet && S.sheet.id === 'S-04' ? (el.querySelector('.mcell.on') || el.querySelector('.mgrid button')) : null;
+  /* S-04 は、いま見ている月のマスへ（その年に無いときは、その年で選べる最初のマス）。§4.0.3・S-04。S-32 の「何月分から」も同じ */
+  const mcell = S.sheet && (S.sheet.id === 'S-04' || (S.sheet.id === 'S-32' && S.sheet.mgrid)) ? (el.querySelector('.mcell.on') || el.querySelector('.mgrid button')) : null;
   if (mcell) { el.removeAttribute('tabindex'); mcell.focus({ preventScroll: true }); return; }
   const first = [...el.querySelectorAll('.sh-root button, .sh-root input, .sh-root select, .sh-root textarea, .sh-root [tabindex]')]
     .find((x) => !x.disabled && x.getAttribute('tabindex') !== '-1' && !x.closest('[aria-hidden="true"]') && x.getClientRects().length);
@@ -2229,8 +2292,11 @@ BLUR.memoDone = () => {
 ACT.setDate = (v) => { const sh = S.sheet; sh.dateSel = v; sh.dirty = true; sh.err = null; render(); };
 ACT.pickDate = () => { const inp = $('#rec-date'); if (!inp) return; try { inp.showPicker(); } catch (e) { inp.focus(); } };
 CHANGE.otherDate = (v) => {
-  const sh = S.sheet; if (!sh || !v) return;
+  const sh = S.sheet; if (!sh) return;
   const t = today();
+  /* 日付選択の「リセット」は今日に戻す（§12.1 Q28）。範囲の外の日は受けない（iPhone は範囲の外も選べる） */
+  if (!v) { sh.dateSel = 'today'; sh.dirty = true; sh.err = null; render(); return; }
+  if (v < `${S.data.household.createdMonth}-01` || v > t) { render(); return; }
   sh.otherDate = v; sh.dateSel = v === t ? 'today' : v === addDays(t, -1) ? 'yesterday' : 'other';
   sh.dirty = true; sh.err = null; render();
 };
@@ -2477,15 +2543,28 @@ ACT.setDefaultPayer = (v) => {
   render();
 };
 ACT.openS31 = () => { S.sub = 'S-31'; render(); };
+ACT.openS35 = () => openSheet({ id: 'S-35' });
 ACT.backToS30 = () => { S.sub = null; render(); };
 function s32Sheet(id) {
   if (id) {
     const t = S.data.templates.find((x) => x.id === id);
     return { id: 'S-32', tplId: id, origName: t.name, name: t.name, cat: t.cat, catManual: true, payer: t.payer, kind: t.kind, amount: t.amount != null ? String(t.amount) : '', grid: false, err: null, dirty: false };
   }
-  return { id: 'S-32', tplId: null, name: '', cat: null, catManual: false, payer: 'joint', kind: 'fixed', amount: '', grid: false, err: null, dirty: false, focus: 'tpl-name' };
+  const from = s32DefaultFrom();
+  return { id: 'S-32', tplId: null, name: '', cat: null, catManual: false, payer: 'joint', kind: 'fixed', amount: '', from, fromYear: +from.slice(0, 4), mgrid: false, fromMsg: null, grid: false, err: null, dirty: false, focus: 'tpl-name' };
 }
 ACT.openS32 = (id) => openSheet(s32Sheet(id));
+/* 開始月の既定（S-32 追加のとき）: 今月。今月がロック中（精算中・精算済み）なら来月 */
+const s32DefaultFrom = () => (isLocked(curMonth()) ? CALC.addMonth(curMonth(), 1) : curMonth());
+/* from 〜 to のうちロック中の月で一番新しい月（無ければ null）。開始月から今月までの行を作れるかの確かめに使う */
+function newestLockedIn(from, to) {
+  for (let m = to; m >= from; m = CALC.addMonth(m, -1)) if (isLocked(m)) return m;
+  return null;
+}
+/* ひな形の変更の履歴（S-35）に1件足す */
+function pushTplChange(d, tpl, change, from, before, after) {
+  d.tplChanges.push({ id: 'h' + MODEL.nextSeq(), tpl, change, from, before, after, by: S.viewer, at: S.now });
+}
 /* S-32 の文字の欄に入力したら、その場の1行を消す（カテゴリの1行だったらチップの赤い縁も外す） */
 function s32TypedErr(sh, el) {
   const catErr = !!(sh.err && sh.err.field === 'cat');
@@ -2519,6 +2598,19 @@ INPUT.tplAmount = (v, el) => {
   markTplAmount(sh);
 };
 ACT.s32Grid = () => { S.sheet.grid = true; render(); };
+/* 何月分から: チップを押すと中身を月のマスに入れ替える（開いたときは選んでいる月の年） */
+ACT.s32From = () => { const sh = S.sheet; sh.mgrid = true; sh.fromYear = +sh.from.slice(0, 4); sh.fromMsg = null; render(); };
+ACT.s32Year = (d) => { S.sheet.fromYear += +d; S.sheet.fromMsg = null; render(); };
+/* 押した月から今月までにロック中の月があれば選ばない（マスのまま。マスの下に「9月は精算中です（先に精算をやり直します）」）。
+   選べる月なら、フォームに戻ってチップをその月にする（フォーカスはチップへ） */
+ACT.s32Month = (m) => {
+  const sh = S.sheet, lm = newestLockedIn(m, curMonth());
+  if (lm) { sh.fromMsg = lockMsg(lm); render(); return; }
+  if (m !== sh.from) sh.dirty = true;
+  sh.from = m; sh.mgrid = false; sh.fromMsg = null; sh.focus = 'tpl-from';
+  if (sh.err && sh.err.lock) sh.err = null;   /* 保存したときの「精算中です」の1行は、選び直したら消す */
+  render();
+};
 ACT.s32Cat = (k) => { const sh = S.sheet; sh.cat = k; sh.catManual = true; sh.grid = false; sh.dirty = true; if (sh.err && sh.err.field === 'cat') sh.err = null; render(); };
 ACT.s32Payer = (w) => { S.sheet.payer = w; S.sheet.dirty = true; render(); };
 ACT.s32Kind = (k) => { S.sheet.kind = k; S.sheet.dirty = true; if (S.sheet.err && S.sheet.err.field === 'amount') S.sheet.err = null; render(); };
@@ -2534,14 +2626,27 @@ ACT.s32Save = () => {
   if (sh.tplId) {
     const t = S.data.templates.find((x) => x.id === sh.tplId);
     if (t.name === name && t.cat === sh.cat && t.payer === sh.payer && t.kind === sh.kind && t.amount === amount) return closeSheet(false);
-    /* ひな形の変更は、まだ作っていない月から効く（作った行は変えない。§6.5） */
-    commit(() => { Object.assign(t, { name, cat: sh.cat, payer: sh.payer, kind: sh.kind, amount }); return '保存しました'; });
+    /* ひな形の変更は、まだ作っていない月から効く（作った行は変えない。§6.5）。
+       履歴の月は、そのひな形で作ってある一番新しい月の次の月（行が無ければ開始月） */
+    commit(() => {
+      const before = tplValues(t);
+      Object.assign(t, { name, cat: sh.cat, payer: sh.payer, kind: sh.kind, amount });
+      const last = S.data.expenses.filter((e) => e.tpl === t.id).reduce((mx, e) => (e.labelMonth > mx ? e.labelMonth : mx), '');
+      pushTplChange(S.data, t.id, 'update', last ? CALC.addMonth(last, 1) : t.from, before, tplValues(t));
+      return '保存しました';
+    });
   } else {
-    const cur = curMonth(), from = isLocked(cur) ? CALC.addMonth(cur, 1) : cur;
+    /* 開始月（選んだ月。既定は今月、今月がロック中なら来月）から今月までの各月の行をすぐ作る。
+       そのあいだにロック中の月があれば保存しない（相手が先に精算した、など。固定部分の直上に1行） */
+    const cur = curMonth(), from = sh.from || s32DefaultFrom();
+    const lm = newestLockedIn(from, cur);
+    if (lm) return sheetErr(lockMsg(lm), 'info', { lock: true });
     commit(() => {
       const d = S.data, id = 'tn' + MODEL.nextSeq();
-      d.templates.push({ id, name, cat: sh.cat, payer: sh.payer, kind: sh.kind, amount, from, until: null, createdBy: S.viewer });
-      if (from === cur) d.expenses.push(MODEL.row(['n' + MODEL.nextSeq(), cur + '-01', sh.payer, sh.cat, amount, name, 'auto', S.now, { tpl: id }]));
+      const t = { id, name, cat: sh.cat, payer: sh.payer, kind: sh.kind, amount, from, until: null, createdBy: S.viewer, createdAt: S.now };
+      d.templates.push(t);
+      for (let m = from; m <= cur; m = CALC.addMonth(m, 1)) d.expenses.push(MODEL.row(['n' + MODEL.nextSeq(), m + '-01', sh.payer, sh.cat, amount, name, 'auto', S.now, { tpl: id }]));
+      pushTplChange(d, id, 'add', from, null, tplValues(t));
       return `${name}を追加しました`;
     });
   }
@@ -2551,7 +2656,7 @@ ACT.s32Stop = () => {
   const t = S.data.templates.find((x) => x.id === S.sheet.tplId);
   if (S.offline) return sheetErr('オンラインで直せます', 'info');
   const until = CALC.addMonth(curMonth(), 1);
-  commit(() => { t.until = until; return `${t.name}をやめました（${mShort(until)}から）`; });
+  commit(() => { t.until = until; pushTplChange(S.data, t.id, 'stop', until, tplValues(t), null); return `${t.name}をやめました（${mShort(until)}から）`; });
   dropSheet(); render();
 };
 const s33Sheet = (p) => ({ id: 'S-33', p, name: S.data.people[p].name, color: S.data.people[p].color, rate: String(S.data.people[p].ratePct), salaryToJoint: !!S.data.people[p].salaryToJoint, err: null, dirty: false });
@@ -2635,13 +2740,14 @@ const LIMITS = {
   'S-21': { blue: 1, gMax: 7, gDesign: '4', big: 2, inp: 2, b9: true },
   'S-22': { blue: 0, gMax: 7, gDesign: '0', big: 1, inp: 0 },
   'S-30': { blue: 0, gMax: 7, gDesign: '5 (+1)', big: 0, inp: 0 },   /* ふたりの行・毎月の支払い・記録の払った人・パスワード・ログアウト（Safari なら ＋ホーム画面に追加） */
-  'S-31': { blue: 1, gMax: 5, gDesign: '3', big: 1, inp: 0 },
-  'S-32': { blue: 1, gMax: 7, gDesign: '6 (+1)', big: 0, inp: 2, b9: true },
+  'S-31': { blue: 1, gMax: 5, gDesign: '3 (+1)', big: 1, inp: 0 },   /* 戻る・行・＋ 追加（履歴が1件以上なら ＋ 変更の履歴） */
+  'S-32': { blue: 1, gMax: 7, gDesign: '7', big: 0, inp: 2, b9: true },   /* 追加: 名前・カテゴリ・払う人・金額の種類・金額の欄・開始月・保存 ／ 直す: 開始月の代わりに やめる */
   /* S-33 自分の行（normal・action）: 呼び名・色・出す割合・給料の入り先・保存 ＝ 5。
      相手の行（partner）は出す割合と給料の入り先が読み取り専用なので 呼び名・色・保存 ＝ 3・入力欄 1（§2.2） */
   'S-33': { blue: 1, gMax: 7, gDesign: '5', big: 0, inp: 2 },
   'S-33:partner': { blue: 1, gMax: 7, gDesign: '3', big: 0, inp: 1 },
   'S-34': { blue: 1, gMax: 7, gDesign: '2', big: 0, inp: 1 },
+  'S-35': { blue: 0, gMax: 7, gDesign: '0', big: 0, inp: 0 },   /* 変更の履歴（読み取り専用。閉じるだけ） */
 };
 
 /* 画面へジャンプ（§10.2）: [画面ID:状態キー, 表示名, 準備]。準備の関数は使うシナリオを .sc に持つ（ハッシュの j の復元で使う） */
@@ -2699,11 +2805,13 @@ const JUMPS = [
   ['S-22:settled', 'S-22 settled（9月・まさと）', J('sep-settled', 'a', () => { S.tab = 'S-20'; S.month.S20 = '2026-09'; S.sheet = { id: 'S-22', p: 'a', m: '2026-09' }; })],
   ['S-30:normal', 'S-30 設定', J('sep-open', null, () => { S.tab = 'S-30'; })],
   ['S-30:normal:joint', 'S-30 設定（記録の払った人が共用）', J('sep-open', null, () => { S.tab = 'S-30'; S.data.people[S.viewer].defaultPayer = 'joint'; })],
-  ['S-30:empty', 'S-30 empty（毎月の支払い 0件）', J('sep-open', null, () => { S.tab = 'S-30'; S.data.templates = []; })],
+  ['S-30:empty', 'S-30 empty（毎月の支払い 0件）', J('sep-open', null, () => { S.tab = 'S-30'; S.data.templates = []; S.data.tplChanges = []; })],
   ['S-31:normal', 'S-31 毎月の支払い', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; })],
-  ['S-31:empty', 'S-31 empty', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.data.templates = []; })],
+  ['S-31:empty', 'S-31 empty', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.data.templates = []; S.data.tplChanges = []; })],
   ['S-32:empty', 'S-32 追加', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = s32Sheet(null); })],
   ['S-32:normal', 'S-32 直す（ガス代）', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = s32Sheet('t5'); })],
+  ['S-32:empty:from', 'S-32 何月分から', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = { ...s32Sheet(null), focus: null, mgrid: true }; })],
+  ['S-32:empty:from:lock', 'S-32 何月分から（8月を押した・精算済み）', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = { ...s32Sheet(null), focus: null, mgrid: true, fromMsg: lockMsg('2026-08') }; })],
   ['S-32:action', 'S-32 action（名前が空）', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = { ...s32Sheet(null), focus: null, err: { t: '名前を入れてください', kind: 'err', field: 'name' } }; })],
   ['S-33:normal', 'S-33 人の設定（まさと）', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = s33Sheet('a'); })],
   ['S-33:action', 'S-33 action（呼び名が7文字以上）', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = { ...s33Sheet('a'), name: 'まさとまさとま', err: { t: '呼び名は6文字までです', kind: 'err', field: 'name' } }; })],
@@ -2711,6 +2819,7 @@ const JUMPS = [
   ['S-33:partner', 'S-33（相手の行）出す割合と給料の入り先は読み取り専用', J('sep-open', 'a', () => { S.tab = 'S-30'; S.sheet = s33Sheet('b'); })],
   ['S-34:normal', 'S-34 パスワードを変える', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = { id: 'S-34', pw: '', show: false, err: null }; })],
   ['S-34:action', 'S-34 action（8文字未満）', J('sep-open', null, () => { S.tab = 'S-30'; S.sheet = { id: 'S-34', pw: 'abc', show: false, err: { t: '8文字以上にしてください', kind: 'err', field: 'pw' } }; })],
+  ['S-35:normal', 'S-35 変更の履歴', J('sep-open', null, () => { S.tab = 'S-30'; S.sub = 'S-31'; S.sheet = { id: 'S-35' }; })],
 ];
 /* フロー (a)〜(g)（§5）: 出発点を用意して、手順をパネルに出す */
 const FLOWS = [
@@ -2826,7 +2935,7 @@ const MOCK = {
     loadScenario(f[2]); S.viewer = f[3]; S.auth = 'in'; S.route = 'tab'; S.onboarded = { a: true, b: true };
     S.sub = null;   /* 設定の中のページ（S-31）を開いたままフローを始めたときの取りこぼし防止 */
     if (f[0] === 'd') {   /* (d) はひな形の無い状態から始める（S-31 empty と同じ準備 ＋ ロックされていない月の、ひな形から作った行を消す） */
-      S.data.templates = [];
+      S.data.templates = []; S.data.tplChanges = [];
       S.data.expenses = S.data.expenses.filter((e) => !(e.tpl && !isLocked(e.month)));
     }
     /* (g) はりさこの初回（まだ S-10 を見ていないので新着を出さない。§1.1） */
@@ -3029,6 +3138,7 @@ function applyHash() {
     'S-32': () => ACT.openS32(S.data.templates.some((t) => t.id === sa) ? sa : undefined),
     'S-33': () => { if (sa === 'a' || sa === 'b') ACT.openS33(sa); },
     'S-34': () => ACT.openS34(),
+    'S-35': () => { if (S.sub === 'S-31' && S.data.tplChanges.length) ACT.openS35(); },   /* S-31 から開くので、tab が S-31 で履歴があるときだけ */
   }[q.get('sh')];
   if (open) open();
 }

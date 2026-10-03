@@ -510,3 +510,70 @@ select test.eq('追加した月は DB の今日の月',
 select test.eq('追加を元に戻す', public.delete_template('10000006-0000-4000-8000-000000000000') ->> 'result', 'ok');
 select test.eq('2回目は消せない', public.delete_template('10000006-0000-4000-8000-000000000000') ->> 'reason', 'not_found');
 reset role;
+
+\echo '### 毎月の支払いの開始月と変更の履歴（仕様書 §12.1 Q29〜Q31。04 §2.9・§7）'
+-- 追加した5件（8/1）には「追加」が1件ずつ。やめるは取り消したので「やめた」は残らない
+select test.eq('追加の履歴（8/1 の5件）',
+  (select count(*) from public.fixed_cost_template_changes where change = 'add' and from_month = '2026-08-01'), 5::bigint);
+select test.eq('やめるを取り消したら「やめた」は消える',
+  (select count(*) from public.fixed_cost_template_changes where template_id = :'T3' and change = 'stop'), 0::bigint);
+select test.eq('元に戻した追加（保険）の履歴は消える',
+  (select count(*) from public.fixed_cost_template_changes where template_id = '10000006-0000-4000-8000-000000000000'), 0::bigint);
+
+select set_config('request.jwt.claim.sub', :'MA', false);
+set role authenticated;
+-- 光回線を 5,500 → 4,980 に直す（10月分の行があるので 11月分から）
+update public.fixed_cost_templates set amount = 4980 where id = :'T2';
+select test.eq('直した履歴は11月分から',
+  (select from_month from public.fixed_cost_template_changes where template_id = :'T2' and change = 'update'), '2026-11-01'::date);
+select test.eq('直した履歴の前と後',
+  (select (before ->> 'amount') || '→' || (after ->> 'amount') from public.fixed_cost_template_changes
+    where template_id = :'T2' and change = 'update'), '5500→4980');
+-- 元に戻す（同じ人が1分以内にちょうど逆向きに直す）と、履歴を足さずに消す
+update public.fixed_cost_templates set amount = 5500 where id = :'T2';
+select test.eq('元に戻したら直した履歴は消える',
+  (select count(*) from public.fixed_cost_template_changes where template_id = :'T2' and change = 'update'), 0::bigint);
+-- 端末は履歴を書けない（トリガーだけが書く）
+select test.fails('履歴は端末から書けない',
+  $$insert into public.fixed_cost_template_changes (household_id, template_id, change, from_month, after)
+    values ('11111111-1111-1111-1111-111111111111', '10000001-0000-4000-8000-000000000000', 'add', '2026-10-01', '{}'::jsonb)$$,
+  'permission denied');
+-- 開始月に精算済みの8月を選ぶと止まる（8月から今月〈10月〉までにロック中の月がある。9月は sep-redo でやり直し中）
+select test.fails('精算済みの月から始められない',
+  $$insert into public.fixed_cost_templates (household_id, name, category_id, paid_by, amount_kind, amount, start_month)
+    values ('11111111-1111-1111-1111-111111111111', 'Wi-Fi', 'telecom', null, 'fixed', 4980, '2026-08-01')$$,
+  'month_locked');
+-- やり直し中の9月からなら始められる（ここでは確かめるだけで、すぐ元に戻す）
+insert into public.fixed_cost_templates (id, household_id, name, category_id, paid_by, amount_kind, amount, start_month)
+  values ('10000009-0000-4000-8000-000000000000', :'H', 'Wi-Fi', 'telecom', null, 'fixed', 4980, '2026-09-01');
+select test.eq('やり直し中の9月からは始められる',
+  (select start_month from public.fixed_cost_templates where id = '10000009-0000-4000-8000-000000000000'), '2026-09-01'::date);
+select test.eq('9月から始めた追加を元に戻す', public.delete_template('10000009-0000-4000-8000-000000000000') ->> 'result', 'ok');
+-- 古い端末が送る 2000-01-01 は今月になる
+insert into public.fixed_cost_templates (id, household_id, name, category_id, paid_by, amount_kind, amount, start_month)
+  values ('10000007-0000-4000-8000-000000000000', :'H', '新聞', 'other', null, 'fixed', 4400, '2000-01-01');
+select test.eq('範囲の外の開始月は今月',
+  (select start_month from public.fixed_cost_templates where id = '10000007-0000-4000-8000-000000000000'), '2026-10-01'::date);
+select test.eq('追加の履歴は今月分から',
+  (select from_month from public.fixed_cost_template_changes
+    where template_id = '10000007-0000-4000-8000-000000000000' and change = 'add'), '2026-10-01'::date);
+select test.eq('新聞の追加を元に戻す', public.delete_template('10000007-0000-4000-8000-000000000000') ->> 'result', 'ok');
+
+-- 11/2 に、まだ精算していない10月から始める（10月・11月の2か月分の行ができる）
+set kakeibo.today = '2026-11-02';
+insert into public.fixed_cost_templates (id, household_id, name, category_id, paid_by, amount_kind, amount, start_month)
+  values ('10000008-0000-4000-8000-000000000000', :'H', 'Wi-Fi', 'telecom', :'MA', 'fixed', 4980, '2026-10-01');
+select test.eq('前の月から始められる',
+  (select start_month from public.fixed_cost_templates where id = '10000008-0000-4000-8000-000000000000'), '2026-10-01'::date);
+select test.eq('10月分を作る', public.ensure_month('2026-10-01') >= 1, true);
+select test.eq('11月分を作る', public.ensure_month('2026-11-01') >= 1, true);
+select test.eq('Wi-Fi の行は10月分と11月分',
+  (select string_agg(period_month::text, ',' order by period_month) from public.expenses
+    where fixed_cost_id = '10000008-0000-4000-8000-000000000000'), '2026-10-01,2026-11-01');
+-- 2か月分の行があっても、手つかずなら追加を元に戻せる
+select test.eq('2か月分あっても元に戻せる', public.delete_template('10000008-0000-4000-8000-000000000000') ->> 'result', 'ok');
+select test.eq('元に戻したら行も履歴も消える',
+  (select count(*) from public.expenses where fixed_cost_id = '10000008-0000-4000-8000-000000000000')
+  + (select count(*) from public.fixed_cost_template_changes where template_id = '10000008-0000-4000-8000-000000000000'), 0::bigint);
+reset role;
+set kakeibo.today = '2026-10-03';

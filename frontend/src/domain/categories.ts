@@ -21,7 +21,7 @@ export const CATEGORIES: readonly Category[] = [
   { key: 'social', name: '交際', icon: 'gift', guess: [] },
   { key: 'housing', name: '住まい', icon: 'building-2', guess: ['家賃', '管理費'] },
   { key: 'utilities', name: '光熱費', icon: 'lightbulb', guess: ['電気', 'ガス', '水道', '光熱'] },
-  { key: 'telecom', name: '通信', icon: 'wifi', guess: ['携帯', 'スマホ', '光', '回線', 'Wi-Fi', 'NHK'] },
+  { key: 'telecom', name: '通信', icon: 'wifi', guess: ['携帯', 'スマホ', '光', '回線', 'Wi-Fi', 'WiFi', 'NHK'] },
   { key: 'insurance', name: '保険', icon: 'shield', guess: ['保険'] },
   { key: 'medical', name: '医療', icon: 'stethoscope', guess: ['病院', '薬'] },
   { key: 'big_purchase', name: '大型出費', icon: 'sofa', guess: ['家電', '家具'] },

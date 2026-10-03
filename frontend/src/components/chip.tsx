@@ -1,5 +1,5 @@
 import { Box } from '@chakra-ui/react'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { Icon, type IconName } from './icon'
 import { ButtonBox } from './primitives'
 
@@ -14,10 +14,12 @@ export type ChipProps = {
   iconEnd?: IconName
   /** 読み上げ名（例「カテゴリを変える（いまは食料品）」） */
   label?: string
+  /** 押せるチップのボタン（中身を切り替えたあと、フォーカスを戻すため） */
+  ref?: Ref<HTMLButtonElement>
 }
 
 /** チップ（§7.5）: 高さ 36px（上下の余白と合わせてタップ領域 44px）、角丸 full */
-export function Chip({ children, onClick, selected, icon, iconEnd, label }: ChipProps) {
+export function Chip({ children, onClick, selected, icon, iconEnd, label, ref }: ChipProps) {
   const inner = (
     <Box
       display='inline-flex'
@@ -47,7 +49,7 @@ export function Chip({ children, onClick, selected, icon, iconEnd, label }: Chip
     return <Box {...outer}>{inner}</Box>
   }
   return (
-    <ButtonBox type='button' onClick={onClick} {...(label ? { 'aria-label': label } : {})} {...outer}>
+    <ButtonBox ref={ref} type='button' onClick={onClick} {...(label ? { 'aria-label': label } : {})} {...outer}>
       {inner}
     </ButtonBox>
   )

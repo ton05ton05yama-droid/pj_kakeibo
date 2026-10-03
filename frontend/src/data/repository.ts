@@ -143,6 +143,11 @@ export interface TemplateInput {
   payer: Payer
   kind: 'fixed' | 'variable'
   amount: number | null
+  /**
+   * 何月分から記録するか（追加のときだけ使う。S-32 の［9月分 ▾］）。
+   * 省略・家計を作った月より前・今月より後は今月になる（DB の templates_before_insert と同じ）
+   */
+  from?: MonthKey
 }
 
 export interface SessionUser {
@@ -257,6 +262,11 @@ export interface Repository {
 
   /* 毎月の支払い（S-31・S-32） ------------------------------------- */
 
+  /**
+   * ひな形を足し、開始月から今月までの行を作る。
+   * 開始月から今月までに精算中・精算済みの月があれば `RepositoryError('month_locked')`
+   * （detail は一番新しいロック中の月 'YYYY-MM'）。履歴の「追加」は DB のトリガーが書く
+   */
   addTemplate(input: TemplateInput): Promise<void>
   updateTemplate(id: string, input: TemplateInput): Promise<void>
   /** 支払いをやめる（`undo` で取り消す）。`until` はトーストの「（10月から）」 */

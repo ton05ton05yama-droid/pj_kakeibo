@@ -14,11 +14,13 @@ import {
   Avatar,
   BottomSheet,
   Chip,
+  DatePickerOverlay,
   Icon,
   type IconName,
   InlineMessage,
   type InlineMessageTone,
   Keypad,
+  openDatePicker,
   PrimaryButton,
   Segmented,
   useAmountInput,
@@ -129,11 +131,7 @@ export function AmountSheet({ initial, data, people, today, now, onSubmit, onClo
 
   const chooseDate = (next: DateChoice) => {
     if (next === 'other') {
-      const input = dateRef.current
-      if (input) {
-        if (typeof input.showPicker === 'function') input.showPicker()
-        else input.focus()
-      }
+      openDatePicker(dateRef.current)
       return
     }
     setDateChoice(next)
@@ -141,9 +139,15 @@ export function AmountSheet({ initial, data, people, today, now, onSubmit, onClo
   }
 
   const onPickedDate = (value: string) => {
-    if (!value) return
     setOtherDate(value)
     setDateChoice(choiceForDate(value, today))
+    setMessage(null)
+  }
+
+  // 日付選択の「リセット」は今日に戻す（カレンダーも今日を指すので、見た目とそろう。§12.1 Q28）
+  const onResetDate = () => {
+    setOtherDate(null)
+    setDateChoice('today')
     setMessage(null)
   }
 
@@ -273,7 +277,7 @@ export function AmountSheet({ initial, data, people, today, now, onSubmit, onClo
           <Keypad onKey={press} />
         )}
 
-        {/* 日付［今日｜昨日｜ほかの日］。「ほかの日」は端末の日付選択（欄はその位置を指すためだけに置く） */}
+        {/* 日付［今日｜昨日｜ほかの日］。「ほかの日」は端末の日付選択（指で押したときは、マスに重ねた欄が直接受ける） */}
         <Box position='relative' mt={2}>
           <Segmented<DateChoice>
             label='日付'
@@ -288,23 +292,13 @@ export function AmountSheet({ initial, data, people, today, now, onSubmit, onClo
               },
             ]}
           />
-          <InputBox
+          <DatePickerOverlay
             ref={dateRef}
-            type='date'
-            tabIndex={-1}
-            aria-hidden='true'
             value={otherDate ?? ''}
             min={`${data.household.createdMonth}-01`}
             max={today}
-            onChange={(event) => onPickedDate(event.currentTarget.value)}
-            position='absolute'
-            right='0'
-            bottom='0'
-            w='34%'
-            h='100%'
-            opacity='0'
-            pointerEvents='none'
-            border='0'
+            onChange={onPickedDate}
+            onReset={onResetDate}
           />
         </Box>
 
