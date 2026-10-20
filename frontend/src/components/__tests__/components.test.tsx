@@ -234,13 +234,19 @@ function wrapTabBar(options: { path?: string; showSettleDot?: boolean } = {}) {
 const DOT_LABEL = '（やることがあります）'
 
 describe('タブバー（§3.1・§3.2）', () => {
-  it('4つで、並びは 記録 → 支出 → 精算 → 設定', () => {
+  it('5つで、並びは 記録 → 支出 → 分析 → 精算 → 設定', () => {
     wrapTabBar()
     const links = screen.getAllByRole('link')
-    expect(links).toHaveLength(4)
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/record', '/expenses', '/settle', '/settings'])
-    expect(tabs.map((tab) => tab.label)).toEqual(['記録', '支出', '精算', '設定'])
-    for (const [index, label] of ['記録', '支出', '精算', '設定'].entries()) {
+    expect(links).toHaveLength(5)
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/record',
+      '/expenses',
+      '/analysis',
+      '/settle',
+      '/settings',
+    ])
+    expect(tabs.map((tab) => tab.label)).toEqual(['記録', '支出', '分析', '精算', '設定'])
+    for (const [index, label] of ['記録', '支出', '分析', '精算', '設定'].entries()) {
       const link = links[index]
       expect(link).toBeDefined()
       if (link) expect(within(link).getByText(label)).toBeInTheDocument()

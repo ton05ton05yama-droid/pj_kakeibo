@@ -1,7 +1,7 @@
 /**
  * ルーティング（§2.1）のテスト。
  *
- * 4つのタブそれぞれに**本物の画面**が割り当たっていること（仮の中身が残っていないこと）を、
+ * 5つのタブそれぞれに**本物の画面**が割り当たっていること（仮の中身が残っていないこと）を、
  * 各画面の §1.3・§1.4 の文言で確かめる。データは見本データ（§9）のローカル実装。
  */
 import { ChakraProvider } from '@chakra-ui/react'
@@ -16,6 +16,7 @@ import { AuthProvider } from '@/app/providers/auth-provider'
 import { ToastProvider } from '@/app/providers/toast-provider'
 import { createLocalRepository, setRepository } from '@/data'
 import type { ScenarioId } from '@/domain'
+import { forgetAnalysisPeriod } from '@/features/analysis'
 import { forgetExpenseMonth } from '@/features/expense'
 import { resetSettleMonth } from '@/features/settle/use-settle-month'
 import { system } from '@/theme'
@@ -66,6 +67,7 @@ beforeEach(() => {
   originalUserAgent = window.navigator.userAgent
   setRepository(null)
   forgetExpenseMonth()
+  forgetAnalysisPeriod()
   resetSettleMonth()
 })
 
@@ -84,6 +86,13 @@ describe('タブのルート（§2.1）', () => {
   it('/expenses は S-10 支出（月の合計と内訳リンク）', async () => {
     await open('/expenses')
     expect(await screen.findByText('9月のふたりの支出')).toBeInTheDocument()
+    expect(screen.queryByText(PLACEHOLDER)).not.toBeInTheDocument()
+  })
+
+  it('/analysis は S-40 分析（期間の合計）', async () => {
+    await open('/analysis')
+    expect(await screen.findByRole('heading', { name: '分析' })).toBeInTheDocument()
+    expect(screen.getByText('8月〜9月のふたりの支出')).toBeInTheDocument()
     expect(screen.queryByText(PLACEHOLDER)).not.toBeInTheDocument()
   })
 

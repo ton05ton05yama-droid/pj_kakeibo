@@ -8,10 +8,11 @@ export type TabDef = {
   icon: IconName
 }
 
-/** 並びは 記録 → 支出 → 精算 → 設定（2台で同じ。§3.1）。これ以上は増やさない */
+/** 並びは 記録 → 支出 → 分析 → 精算 → 設定（2台で同じ。§3.1・§12.1 Q34） */
 export const tabs: readonly TabDef[] = [
   { to: '/record', label: '記録', icon: 'tabRecord' },
   { to: '/expenses', label: '支出', icon: 'tabExpenses' },
+  { to: '/analysis', label: '分析', icon: 'tabAnalysis' },
   { to: '/settle', label: '精算', icon: 'tabSettle' },
   { to: '/settings', label: '設定', icon: 'tabSettings' },
 ]
@@ -22,7 +23,7 @@ export type TabBarProps = {
 }
 
 /**
- * 下部タブバー（§3.1）: 4等分、高さ 56px ＋ safe-area。
+ * 下部タブバー（§3.1）: 5等分（375px で1つ 75px）、高さ 56px ＋ safe-area。
  * 選ばれているタブはアイコンの後ろに 56×28px のピルを敷き、アイコンとラベルを text.accent にする。
  */
 export function TabBar({ showSettleDot }: TabBarProps) {
@@ -37,7 +38,7 @@ export function TabBar({ showSettleDot }: TabBarProps) {
       right='0'
       bottom='0'
       zIndex='sticky'
-      gridTemplateColumns='repeat(4, 1fr)'
+      gridTemplateColumns={`repeat(${tabs.length}, 1fr)`}
       h='calc(var(--tabbar-h) + var(--sa-bottom))'
       pb='var(--sa-bottom)'
       pl='env(safe-area-inset-left, 0px)'

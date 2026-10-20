@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router'
 import { useAuth } from '@/app/providers'
 import { useHousehold } from '@/data'
 import type { Expense } from '@/domain'
+import { AnalysisScreen } from '@/features/analysis'
 import { LoginScreen, OnboardingScreen } from '@/features/auth'
 import { ExpensesScreen } from '@/features/expense'
 import { RecordScreen } from '@/features/record'
@@ -35,7 +36,7 @@ function SignedIn() {
 }
 
 /**
- * 画面遷移（§2.1）。タブは4つで、アプリはいつも**記録**タブで開く。
+ * 画面遷移（§2.1）。タブは5つ（記録・支出・分析・精算・設定。§12.1 Q34）で、アプリはいつも**記録**タブで開く。
  * シート（S-03・S-04・S-12〜S-15・S-21・S-22・S-32〜S-34）はルートにせず、各画面の状態で持つ（§4.0.3）。
  */
 function Tabs() {
@@ -58,6 +59,7 @@ function Tabs() {
         <Route element={<AppLayout />}>
           <Route path='/record' element={<RecordScreen />} />
           <Route path='/expenses' element={<ExpensesScreen />} />
+          <Route path='/analysis' element={<AnalysisScreen />} />
           <Route path='/settle' element={<SettleScreen onFillPending={startFill} />} />
           <Route path='/settings' element={<SettingsTab />} />
           {/* 共通部品の見本（開発のときだけ。アプリの画面ではない） */}

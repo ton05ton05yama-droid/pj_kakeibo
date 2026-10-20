@@ -5,6 +5,7 @@
  * UI からは必ずここを通して使う（DB の値を UI で直接計算しない。§6.2）。
  */
 
+export * from './analysis'
 export * from './calc'
 export * from './categories'
 export * from './month'

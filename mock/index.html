@@ -180,8 +180,8 @@ p, h1, h2, h3 { margin: 0; }
 .notice .ic:last-child { color: var(--text-muted); }
 .offline { display: flex; align-items: center; gap: 6px; height: var(--offline-h); margin: 0 calc(-1 * var(--pad-r)) 0 calc(-1 * var(--pad-l)); padding: 0 var(--pad-r) 0 var(--pad-l); background: var(--bg-muted); color: var(--text-sub); font-size: var(--fs-body-sm); font-weight: 500; }
 .offline .ic { width: 16px; height: 16px; }
-/* タブバー（§3.1） */
-.tabbar { position: absolute; left: 0; right: 0; bottom: 0; z-index: var(--z-sticky); display: grid; grid-template-columns: repeat(4, 1fr); height: calc(var(--tabbar-h) + var(--sa-bottom)); padding: 0 env(safe-area-inset-right, 0px) var(--sa-bottom) env(safe-area-inset-left, 0px); background: var(--bg-surface); border-top: 1px solid var(--border); }
+/* タブバー（§3.1）。5つを均等に割る（375px で1つ 75×56px。記録・支出・分析・精算・設定） */
+.tabbar { position: absolute; left: 0; right: 0; bottom: 0; z-index: var(--z-sticky); display: grid; grid-template-columns: repeat(5, 1fr); height: calc(var(--tabbar-h) + var(--sa-bottom)); padding: 0 env(safe-area-inset-right, 0px) var(--sa-bottom) env(safe-area-inset-left, 0px); background: var(--bg-surface); border-top: 1px solid var(--border); }
 .tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--text-muted); font-size: var(--fs-xs); font-weight: 600; line-height: 1.2; transition: background var(--dur-fast); }
 .tab:active { background: var(--bg-muted); }
 .tab-ic { position: relative; width: 56px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-full); }
@@ -335,6 +335,22 @@ p, h1, h2, h3 { margin: 0; }
 /* 横棒（S-13） */
 .hbar { height: 6px; border-radius: var(--radius-full); background: var(--bg-muted); overflow: hidden; margin-top: 6px; }
 .hbar > i { display: block; height: 100%; border-radius: var(--radius-full); background: var(--text-muted); }
+/* 分析（S-40・S-41）。期間の行（チップ2つ）・月ごとの推移（縦棒。高さ 140px）・カテゴリの行（S-13 と同じ見た目で、行全体が押せる） */
+.a-period { display: flex; align-items: center; gap: 6px; min-height: 44px; color: var(--text-sub); font-size: var(--fs-md); font-weight: 500; }
+.a-period .chip-in { color: var(--text-main); padding: 0 10px 0 14px; gap: 4px; }
+.a-period .chip:active .chip-in { background: var(--border); }
+/* 縦棒: 上に金額 12px、下に月 12px（どちらも --text-sub）。棒は --text-muted・角丸 4px・地なし。押せない。
+   棒の幅は列の幅から決まる（3本で約 60px、12本で約 20px）。金額は列に入るときだけ出す（7か月以上は出さない） */
+.a-chart { display: flex; align-items: stretch; gap: 8px; height: 140px; margin-top: 12px; }
+.a-chart.many { gap: 4px; }
+.a-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+.a-col .v, .a-col .m { flex: none; font-size: var(--fs-sm); font-weight: 500; color: var(--text-sub); line-height: var(--lh-ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.a-col .b { flex: 1; min-height: 0; width: 100%; max-width: 60px; display: flex; align-items: flex-end; margin: 2px 0; }
+.a-col .b > i { display: block; width: 100%; border-radius: var(--radius-tag); background: var(--text-muted); }
+.arow { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-min-h); padding: 8px 0; border-radius: var(--radius-control); text-align: left; }
+.arow:active { background: var(--bg-muted); }
+.arow-main { flex: 1; min-width: 0; }
+.arow > .ic { color: var(--text-muted); }
 /* 設定の行 */
 .srow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--row-min-h); padding: 8px 12px; background: var(--bg-surface); text-align: left; font-size: var(--fs-lg); font-weight: 500; position: relative; }
 .srow + .srow { border-top: 1px solid var(--border); }
@@ -452,6 +468,7 @@ p, h1, h2, h3 { margin: 0; }
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
 <symbol id="i-receipt-text" viewBox="0 0 24 24"><path d="M13 16H8"/><path d="M14 8H8"/><path d="M16 12H8"/><path d="M4 3a1 1 0 0 1 1-1 1.3 1.3 0 0 1 .7.2l.933.6a1.3 1.3 0 0 0 1.4 0l.934-.6a1.3 1.3 0 0 1 1.4 0l.933.6a1.3 1.3 0 0 0 1.4 0l.933-.6a1.3 1.3 0 0 1 1.4 0l.934.6a1.3 1.3 0 0 0 1.4 0l.933-.6A1.3 1.3 0 0 1 19 2a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1 1.3 1.3 0 0 1-.7-.2l-.933-.6a1.3 1.3 0 0 0-1.4 0l-.934.6a1.3 1.3 0 0 1-1.4 0l-.933-.6a1.3 1.3 0 0 0-1.4 0l-.933.6a1.3 1.3 0 0 1-1.4 0l-.934-.6a1.3 1.3 0 0 0-1.4 0l-.933.6a1.3 1.3 0 0 1-.7.2 1 1 0 0 1-1-1z"/></symbol>
 <symbol id="i-arrow-left-right" viewBox="0 0 24 24"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+<symbol id="i-chart-column" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
 <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
 <symbol id="i-calendar-sync" viewBox="0 0 24 24"><path d="M11 10v4h4"/><path d="m11 14 1.535-1.605a5 5 0 018 1.5"/><path d="M16 2v3"/><path d="m21 18-1.535 1.605a5 5 0 01-8-1.5"/><path d="M21 22v-4h-4"/><path d="M21 8.517V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h3.517"/><path d="M3 9h4"/><path d="M8 2v3"/></symbol>
@@ -517,7 +534,7 @@ if (typeof document !== 'undefined') document.documentElement.lang = 'ja';
    JS の並び（仕様を変えたら該当の番号へ）
    1 DATA（§9 見本データ） 2 CALC（§6.2 計算のきまり・純粋関数） 3 MODEL（データを変える操作）
    4 SCENARIOS（§9.5・§10.2） 5 VERIFY（§9.6 検算） 6 STATE 7 UTIL（書式・部品）
-   8 画面ごとの render（S-01〜S-35） 9 ACTIONS（イベント） 10 MOCK（§10） 11 起動
+   8 画面ごとの render（S-01〜S-41） 9 ACTIONS（イベント） 10 MOCK（§10） 11 起動
    ===================================================================== */
 
 /* ---------------------------------------------------------------------
@@ -810,7 +827,40 @@ const CALC = (() => {
     return best;
   }
 
-  return { monthOf, addMonth, contributionOf, rateFor, salaryToJointFor, jointSalaryOf, salaryInOf, isPending, isCounted, isLockedStatus, summarize, computeSettle, remainingOf, monthStatus, settleModel, s20State, monthsUntil, attention, defaultSettleMonth, guessCategory };
+  /* ===== 分析（S-40・S-41）。月は帰属月。数えるのは支出タブの合計と同じ記録（summarize の isCounted）===== */
+  const ANALYSIS_MAX = 12;   /* 期間は12か月まで */
+  /* from〜to の月の並び（古い順） */
+  function monthsBetween(from, to) { const out = []; for (let m = from; m <= to; m = addMonth(m, 1)) out.push(m); return out; }
+  /* 既定の期間: 過去3か月（今月を含む）。家計を作った月より前は含めない */
+  function analysisDefault(d, now) {
+    const to = monthOf(now), f = addMonth(to, -2);
+    return { from: f < d.household.createdMonth ? d.household.createdMonth : f, to };
+  }
+  /* 始めの月（end = 'from'）か終わりの月（'to'）を m にしたあとの期間。
+     始めの月が終わりの月より後になったら、もう片方を同じ月にする。12か月を超えたら、もう片方を11か月後（前）にする */
+  function analysisAdjust(range, end, m) {
+    let { from, to } = range;
+    if (end === 'from') { from = m; if (from > to) to = from; if (to > addMonth(from, ANALYSIS_MAX - 1)) to = addMonth(from, ANALYSIS_MAX - 1); }
+    else { to = m; if (to < from) from = to; if (from < addMonth(to, -(ANALYSIS_MAX - 1))) from = addMonth(to, -(ANALYSIS_MAX - 1)); }
+    return { from, to };
+  }
+  /* 期間の合計・金額待ちの件数・月ごとの合計（古い順）・カテゴリ別の合計（多い順。0円は入らない） */
+  function analysisSummary(d, from, to) {
+    const months = [], cat = new Map(); let total = 0, pendingCount = 0, count = 0;
+    for (const m of monthsBetween(from, to)) {
+      const sm = summarize(d.expenses, m);
+      months.push({ month: m, total: sm.total }); total += sm.total; count += sm.count; pendingCount += sm.pending.length;
+      for (const x of sm.byCat) cat.set(x.cat, (cat.get(x.cat) || 0) + x.amount);
+    }
+    const categories = [...cat.entries()].map(([c, amount]) => ({ cat: c, amount })).sort((x, y) => y.amount - x.amount);
+    return { from, to, total, count, pendingCount, months, categories };
+  }
+  /* 1つのカテゴリの月ごとの合計（古い順。0円の月も入る） */
+  function categoryByMonth(d, cat, from, to) {
+    return monthsBetween(from, to).map((m) => ({ month: m, amount: (summarize(d.expenses, m).byCat.find((x) => x.cat === cat) || { amount: 0 }).amount }));
+  }
+
+  return { monthsBetween, analysisDefault, analysisAdjust, analysisSummary, categoryByMonth, monthOf, addMonth, contributionOf, rateFor, salaryToJointFor, jointSalaryOf, salaryInOf, isPending, isCounted, isLockedStatus, summarize, computeSettle, remainingOf, monthStatus, settleModel, s20State, monthsUntil, attention, defaultSettleMonth, guessCategory };
 })();
 
 /* ---------------------------------------------------------------------
@@ -1103,6 +1153,30 @@ function runVerification() {
   /* 補足: もう払った分の件数（§9.6 S-22 の表）と §9.8 のシナリオ期待値 */
   ok = sets.filter(([, , ex]) => ex.advCount).every(([, md, ex]) => md.sum.advRows.a.length === ex.advCount.a && md.sum.advRows.b.length === ex.advCount.b);
   add('S-22', 'もう払った分の件数（8月 6・6 ／ 見込み 6・5 ／ 確定 8・6 ／ やり直し 9・6）', ok, sets.map(([n, md]) => `${n} ${md.sum.advRows.a.length}・${md.sum.advRows.b.length}`).join(' ／ '));
+  /* 分析（S-40・S-41）: 月ごとの和 ＝ カテゴリ別の和 ＝ 期間の合計。1か月だけなら S-10 の合計・S-13 の内訳と同じ。期間のきまり（既定・12か月まで・前後の入れ替わり） */
+  {
+    const badA = [];
+    for (const [n, b, from, to] of [['9/22', open, '2026-08', '2026-09'], ['10/1', ready, '2026-08', '2026-10'], ['やり直し後', redo, '2026-08', '2026-10']]) {
+      const a = CALC.analysisSummary(b.data, from, to);
+      const sm = a.months.reduce((t, x) => t + x.total, 0), sc = a.categories.reduce((t, x) => t + x.amount, 0);
+      if (sm !== a.total || sc !== a.total) badA.push(n + ' 和');
+      if (a.months.some((x) => x.total !== CALC.summarize(b.data.expenses, x.month).total)) badA.push(n + ' 月ごと');
+      for (const c of a.categories) if (CALC.categoryByMonth(b.data, c.cat, from, to).reduce((t, x) => t + x.amount, 0) !== c.amount) badA.push(n + ' ' + c.cat);
+      if (a.pendingCount !== a.months.reduce((t, x) => t + CALC.summarize(b.data.expenses, x.month).pending.length, 0)) badA.push(n + ' 金額待ち');
+    }
+    const a1 = CALC.analysisSummary(open.data, '2026-09', '2026-09');
+    if (a1.total !== EXPECT.sepOpen.total || !eq(a1.categories.map((x) => [x.cat, x.amount]), EXPECT.sepOpen.byCat) || a1.pendingCount !== 2) badA.push('1か月（9月見込み）');
+    const ao = CALC.analysisSummary(open.data, '2026-08', '2026-09');
+    if (ao.total !== EXPECT.aug.total + EXPECT.sepOpen.total) badA.push('8月〜9月');
+    if (!eq(CALC.analysisDefault(open.data, open.now), { from: '2026-08', to: '2026-09' }) || !eq(CALC.analysisDefault(ready.data, ready.now), { from: '2026-08', to: '2026-10' })
+      || !eq(CALC.analysisDefault({ household: { createdMonth: '2025-01' } }, '2026-10-03T00:00'), { from: '2026-08', to: '2026-10' })) badA.push('既定の期間');
+    const adj = CALC.analysisAdjust, r0 = { from: '2026-08', to: '2026-10' };
+    if (!eq(adj(r0, 'from', '2025-03'), { from: '2025-03', to: '2026-02' }) || !eq(adj(r0, 'to', '2027-12'), { from: '2027-01', to: '2027-12' })
+      || !eq(adj(r0, 'from', '2026-12'), { from: '2026-12', to: '2026-12' }) || !eq(adj(r0, 'to', '2026-05'), { from: '2026-05', to: '2026-05' })
+      || !eq(adj(r0, 'from', '2025-11'), { from: '2025-11', to: '2026-10' })) badA.push('期間のきまり');
+    add('S-40', '分析: 月ごとの和 ＝ カテゴリ別の和 ＝ 期間の合計（1か月なら S-10・S-13 と同じ）、既定の期間・12か月まで', badA.length === 0,
+      badA.length ? badA.join('、') : `9/22 の 8月〜9月 ${ao.months.map((x) => f(x.total)).join(' ＋ ')} ＝ ${f(ao.total)}（金額待ち ${ao.pendingCount}件は入れない）`);
+  }
   const attKey = (a) => a ? [a.kind, a.m].concat(a.amount != null ? [a.amount] : []).join(':') : null;
   const bad = [];
   for (const [sc, ex] of Object.entries(EXPECT.scen)) {
@@ -1148,6 +1222,7 @@ const S = {
   viewer: 'a', auth: 'in', route: 'tab', tab: 'S-11', sub: null,
   onboarded: { a: true, b: true },
   month: { S10: null, S20: null },        /* §3.4 月はタブごとに持つ */
+  range: { from: null, to: null },         /* 分析タブ（S-40）の期間。タブを移っても覚えておく（アプリを開き直したら既定に戻る。保存しない） */
   sheet: null, sheetEnter: false,
   returnFocus: null,                       /* シートを開く前にフォーカスしていた要素（閉じたら戻す） */
   toast: null, toastTimer: 0,
@@ -1182,6 +1257,7 @@ function resetView() {
   S.s20msg = null; S.s30msg = null; S.highlight = null; S.settleNow = null;
   S.month.S10 = CALC.monthOf(S.now);
   S.month.S20 = CALC.defaultSettleMonth(S.data, S.now);
+  S.range = CALC.analysisDefault(S.data, S.now);
   hideToast();
 }
 
@@ -1197,6 +1273,8 @@ const yen = (n) => '¥' + fmt(n);
 const mNum = (m) => +m.slice(5, 7);
 const mShort = (m) => mNum(m) + '月';
 const mLabel = (m) => `${+m.slice(0, 4)}年${mNum(m)}月`;
+/* 期間の書き方（S-40・S-41）: 「8月〜10月」。年をまたぐときは「2025年12月〜2026年2月」。1か月だけのときは「8月」 */
+const rangeLabel = (from, to) => (from === to ? mShort(from) : from.slice(0, 4) === to.slice(0, 4) ? `${mShort(from)}〜${mShort(to)}` : `${mLabel(from)}〜${mLabel(to)}`);
 const md = (dt) => `${+dt.slice(5, 7)}/${+dt.slice(8, 10)}`;
 const hm = (dt) => (dt && dt.length > 10 ? `${+dt.slice(11, 13)}:${dt.slice(14, 16)}` : '');
 const wd = (date) => '日月火水木金土'[new Date(Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10))).getUTCDay()];
@@ -1321,7 +1399,7 @@ const SHEETS = {};
 function sheetLabel(sh) {
   switch (sh.id) {
     case 'S-03': return 'ホーム画面に追加';
-    case 'S-04': return '月を選ぶ';
+    case 'S-04': return sh.end ? (sh.end === 'from' ? '始めの月' : '終わりの月') : '月を選ぶ';
     case 'S-12': return `いくら？（${catOf(sh.cat).name}）`;
     case 'S-13': return `${mShort(sh.m)}の内訳`;
     case 'S-14': {
@@ -1335,6 +1413,7 @@ function sheetLabel(sh) {
     case 'S-33': return `人の設定（${whoName(sh.p)}）`;
     case 'S-34': return 'パスワードを変える';
     case 'S-35': return '変更の履歴';
+    case 'S-41': return `${catOf(sh.cat).name}（${rangeLabel(S.range.from, S.range.to)}）`;
     default: return '';
   }
 }
@@ -1394,8 +1473,11 @@ SHEETS['S-03'] = () => `<div class="sh-root" data-screen="S-03" data-state="norm
    年の切替はシートの中の状態（開いたときは見ている月の年）。マスを押すと、そのタブの月を変えてシートを閉じる。
    金額・精算の状態はマスに出さない（選ぶ前に読む量を増やさない。§11）。
    家計を作る前の月・今月より先の月はボタンにしない（P7）。今月（JST）にだけ「今月」を添える（精算タブの既定の月は今月とは限らないため、目印は「今月」だけ） */
+/* 分析タブ（S-40）の期間のチップから開いたとき（sh.end = 'from' ／ 'to'）だけ、見出し「始めの月」／「終わりの月」を出す。
+   青い縁は、いま選んでいるその端の月。支出・精算から開いたときは今までどおり見出しなし */
 SHEETS['S-04'] = (sh) => `<div class="sh-root" data-screen="S-04" data-state="normal">
-  ${monthPicker({ year: sh.year, first: S.data.household.createdMonth, last: curMonth(), cur: S.month[sh.tab], act: 'pickMonth', yearAct: 's04Year' })}
+  ${sh.end ? `<h2 class="sh-title" style="margin:4px 0 4px">${sh.end === 'from' ? '始めの月' : '終わりの月'}</h2>` : ''}
+  ${monthPicker({ year: sh.year, first: S.data.household.createdMonth, last: curMonth(), cur: sh.end ? S.range[sh.end] : S.month[sh.tab], act: 'pickMonth', yearAct: 's04Year' })}
 </div>`;
 /* 年の行（‹ 2026 ›）と12か月のマス。S-04 と S-32 の「何月分から」で使う同じ部品（§7.5）。
    year = 出す年、first〜last = 選べる月（範囲の外はボタンにしない。P7）、cur = 選択中の月（青い縁）、act = マスの操作、yearAct = 年の ‹ › の操作。
@@ -1554,6 +1636,52 @@ SHEETS['S-13'] = (sh) => {
     <div class="kv"><span style="display:inline-flex;align-items:center;gap:8px;font-weight:500">${ic(c.icon, 20)}${c.name}</span><span class="num">${fmt(x.amount)}</span></div>
     <div class="hbar" aria-hidden="true"><i style="width:${(x.amount / max * 100).toFixed(1)}%"></i></div></div>`; }).join('')}
   ${sum.pending.length ? `<p class="note" style="margin-top:8px">金額待ち ${sum.pending.length}件は入っていません</p>` : ''}
+</div>`;
+};
+
+/* ===== 分析タブ（S-40・S-41） ===== */
+
+/* S-40 分析（§4 S-40）。分析タブのトップ。答える問いは「この期間、何にいくら払った？」。見るだけ（直せる値は無い）。
+   月切替（‹ ›）は置かず、期間をチップ2つ（始めの月・終わりの月）で選ぶ。人の色は使わない・人ごとの合計は出さない（P10）。
+   状態 normal / action（金額待ちの注記）/ empty（期間に数える記録が無い） */
+function renderS40() {
+  const { from, to } = S.range;
+  const a = CALC.analysisSummary(S.data, from, to);
+  const empty = a.count === 0;
+  const state = empty ? 'empty' : a.pendingCount ? 'action' : 'normal';
+  const chip = (end, m) => `<button type="button" class="chip" data-act="openRange" data-arg="${end}" aria-label="${end === 'from' ? '始めの月' : '終わりの月'} ${mLabel(m)}（押すと選び直す）"><span class="chip-in">${mLabel(m)}${ic('chevron-down', 16)}</span></button>`;
+  let h = `<div class="screen" data-screen="S-40" data-state="${state}">
+  <header class="appbar"><span></span><h1 class="appbar-plain" tabindex="-1">分析</h1><span></span></header>${offlineLine()}
+  <div class="a-period" data-g="period">${chip('from', from)}<span aria-hidden="true">〜</span>${chip('to', to)}</div>
+  <p class="cap" style="margin-top:4px">${rangeLabel(from, to)}のふたりの支出</p>
+  <p class="total" data-big>${yen(a.total)}</p>`;
+  if (a.pendingCount) h += `<p class="note" style="margin-top:2px">金額待ち ${a.pendingCount}件は入っていません</p>`;
+  if (empty) return h + `<p class="msg" style="margin-top:32px;text-align:center">この期間の記録はありません</p><div class="list-end"></div></div>`;
+  /* 月ごとの推移（押せない）。高さは期間の一番多い月を 100% に。読み上げは1つの画像として月と金額を並べる（「8月 255,890、9月 180,670」） */
+  const maxM = Math.max(1, ...a.months.map((x) => x.total));
+  const many = a.months.length > 6;   /* 7か月以上は列が細く、金額（6〜7桁）が入らないので棒の上の金額を出さない */
+  h += `<div class="a-chart${many ? ' many' : ''}" role="img" aria-label="${a.months.map((x) => `${mShort(x.month)} ${fmt(x.total)}`).join('、')}">` + a.months.map((x) =>
+    `<div class="a-col" aria-hidden="true">${many ? '' : `<span class="v">${fmt(x.total)}</span>`}<span class="b"><i style="height:${(x.total / maxM * 100).toFixed(1)}%"></i></span><span class="m">${mShort(x.month)}</span></div>`).join('') + `</div>`;
+  /* カテゴリ（多い順。0円は出さない）。S-13 と同じ見た目で、行全体が押せる（右に ›）→ S-41 */
+  const maxC = a.categories.length ? a.categories[0].amount : 1;
+  h += `<h2 class="sec" style="margin:20px 0 0">カテゴリ</h2><div data-g="cats">` + a.categories.map((x) => { const c = catOf(x.cat); return `<button type="button" class="arow" data-act="openS41" data-arg="${x.cat}">
+    <span class="arow-main"><span class="kv"><span style="display:inline-flex;align-items:center;gap:8px;font-weight:500">${ic(c.icon, 20)}${c.name}</span><span class="num">${fmt(x.amount)}</span></span>
+    <span class="hbar" style="display:block" aria-hidden="true"><i style="width:${(x.amount / maxC * 100).toFixed(1)}%"></i></span></span>${ic('chevron-right', 16)}</button>`; }).join('') + `</div>`;
+  return h + `<div class="list-end"></div></div>`;
+}
+
+/* S-41 カテゴリの月ごと（§4 S-41）。S-40 のカテゴリの行から開くシート。期間の各月を古い順に（0円の月も「0」）。行は押せない。状態 normal だけ */
+SHEETS['S-41'] = (sh) => {
+  const c = catOf(sh.cat); if (!c) return '';
+  const { from, to } = S.range;
+  const rows = CALC.categoryByMonth(S.data, sh.cat, from, to);
+  const sum = rows.reduce((t, x) => t + x.amount, 0), max = Math.max(1, ...rows.map((x) => x.amount));
+  return `<div class="sh-root" data-screen="S-41" data-state="normal">
+  <h2 class="sh-title" style="margin:4px 0 4px;display:flex;align-items:center;gap:8px">${ic(c.icon, 20)}${c.name}</h2>
+  <p class="kv" style="justify-content:flex-start;margin-bottom:4px"><span class="cap">${rangeLabel(from, to)}</span><span class="num">${yen(sum)}</span></p>
+  ${rows.map((x) => `<div style="padding:8px 0">
+    <div class="kv"><span style="font-weight:500">${mShort(x.month)}</span><span class="num">${fmt(x.amount)}</span></div>
+    <div class="hbar" aria-hidden="true"><i style="width:${(x.amount / max * 100).toFixed(1)}%"></i></div></div>`).join('')}
 </div>`;
 };
 
@@ -2017,6 +2145,7 @@ function renderPage() {
   if (S.route === 'S-02') return { html: renderS02(), key: 'S-02', tabbar: false };
   if (S.tab === 'S-11') return { html: renderS11(), key: 'S-11', tabbar: true };
   if (S.tab === 'S-10') return { html: renderS10(), key: 'S-10:' + S.month.S10, tabbar: true };
+  if (S.tab === 'S-40') return { html: renderS40(), key: 'S-40', tabbar: true };
   if (S.tab === 'S-20') return { html: renderS20(), key: 'S-20:' + S.month.S20, tabbar: true };
   if (S.sub === 'S-31') return { html: renderS31(), key: 'S-31', tabbar: true };
   return { html: renderS30(), key: 'S-30', tabbar: true };
@@ -2027,7 +2156,7 @@ function renderTabbar(show) {
   nav.hidden = !show;
   if (!show) return;
   const dot = !!CALC.attention(S.data, S.viewer, S.now);
-  nav.innerHTML = [['S-11', 'circle-plus', '記録'], ['S-10', 'receipt-text', '支出'], ['S-20', 'arrow-left-right', '精算'], ['S-30', 'settings', '設定']].map(([t, icon, label]) =>
+  nav.innerHTML = [['S-11', 'circle-plus', '記録'], ['S-10', 'receipt-text', '支出'], ['S-40', 'chart-column', '分析'], ['S-20', 'arrow-left-right', '精算'], ['S-30', 'settings', '設定']].map(([t, icon, label]) =>
     `<button type="button" class="tab ${S.tab === t ? 'on' : ''}" data-act="tab" data-arg="${t}" ${S.tab === t ? 'aria-current="page"' : ''}><span class="tab-ic">${ic(icon, 24)}${t === 'S-20' && dot ? '<span class="dot"></span><span class="sr">（やることがあります）</span>' : ''}</span><span>${label}</span></button>`).join('');
 }
 function renderSheet() {
@@ -2208,7 +2337,11 @@ ACT.monthStep = (arg) => { const [k, dlt] = arg.split(':'); S.month[k] = CALC.ad
 const s04Sheet = (k) => ({ id: 'S-04', tab: k, year: +S.month[k].slice(0, 4) });
 ACT.openS04 = (k) => openSheet(s04Sheet(k));
 ACT.s04Year = (d) => { S.sheet.year += +d; render(); };
-ACT.pickMonth = (m) => { S.month[S.sheet.tab] = m; S.calcOpen = false; S.fixedOpen = false; S.settleNow = null; closeSheet(); };
+/* 分析タブ（S-40）の期間のチップ: 同じ S-04 を見出しつきで開く（end = 'from' 始めの月 ／ 'to' 終わりの月） */
+const rangeSheet = (end) => ({ id: 'S-04', tab: 'A', end, year: +S.range[end].slice(0, 4) });
+ACT.openRange = (end) => openSheet(rangeSheet(end));
+ACT.openS41 = (cat) => openSheet({ id: 'S-41', cat });
+ACT.pickMonth = (m) => { if (S.sheet.end) { S.range = CALC.analysisAdjust(S.range, S.sheet.end, m); closeSheet(); return; } S.month[S.sheet.tab] = m; S.calcOpen = false; S.fixedOpen = false; S.settleNow = null; closeSheet(); };
 ACT.goSettle = (m) => { markSeen(); S.tab = 'S-20'; S.month.S20 = m; S.calcOpen = false; S.settleNow = null; render(); };
 ACT.openSettleFrom = (m) => { dropSheet(); markSeen(); S.tab = 'S-20'; S.month.S20 = m; S.calcOpen = false; S.settleNow = null; render(); };
 ACT.toggleFixed = () => { S.fixedOpen = !S.fixedOpen; render(); };
@@ -2788,6 +2921,9 @@ const LIMITS = {
   'S-33:partner': { blue: 1, gMax: 7, gDesign: '3', big: 0, inp: 1 },
   'S-34': { blue: 1, gMax: 7, gDesign: '2', big: 0, inp: 1 },
   'S-35': { blue: 0, gMax: 7, gDesign: '0', big: 0, inp: 0 },   /* 変更の履歴（読み取り専用。閉じるだけ） */
+  /* 分析タブのトップ（期間・カテゴリの行。条件つきの操作は無いので上限は B2 の 6。一番大きく見せるものは期間の合計。B9 は合計の上端が 200px 以内） */
+  'S-40': { blue: 0, gMax: 6, gDesign: '2', big: 1, inp: 0, b9: true },
+  'S-41': { blue: 0, gMax: 7, gDesign: '0', big: 0, inp: 0 },   /* カテゴリの月ごと（読み取り専用。行は押せない） */
 };
 
 /* 画面へジャンプ（§10.2）: [画面ID:状態キー, 表示名, 準備]。準備の関数は使うシナリオを .sc に持つ（ハッシュの j の復元で使う） */
@@ -2795,6 +2931,12 @@ const LIMITS = {
 function J(sc, v, fn) { const go = () => { loadScenario(sc); if (v) S.viewer = v; S.auth = 'in'; S.route = 'tab'; S.tab = 'S-10'; S.onboarded = { a: true, b: true }; if (fn) fn(); }; go.sc = sc; return go; }
 const toS20 = (m) => () => { S.tab = 'S-20'; if (m) S.month.S20 = m; };
 const JUMPS = [
+  /* 分析（S-40・S-41）。normal は金額待ちの無い期間（10/1 の 8月〜9月）、action は 9/22 の既定の期間（8月〜9月・金額待ち 2件） */
+  ['S-40:normal', 'S-40 分析（10/1・8月〜9月）', J('sep-ready', null, () => { S.tab = 'S-40'; S.range = { from: '2026-08', to: '2026-09' }; })],
+  ['S-40:action', 'S-40 action（9/22・既定の期間・金額待ちの注記）', J('sep-open', null, () => { S.tab = 'S-40'; })],
+  ['S-40:empty', 'S-40 empty（期間に記録が無い）', J('sep-open', null, () => { S.tab = 'S-40'; S.data.expenses = []; })],
+  ['S-40:normal:pick', 'S-40 始めの月を選ぶ（S-04）', J('sep-ready', null, () => { S.tab = 'S-40'; S.range = { from: '2026-08', to: '2026-09' }; S.sheet = rangeSheet('from'); })],
+  ['S-41:normal', 'S-41 カテゴリの月ごと（外食・8月〜9月）', J('sep-ready', null, () => { S.tab = 'S-40'; S.range = { from: '2026-08', to: '2026-09' }; S.sheet = { id: 'S-41', cat: 'dining' }; })],
   ['S-01:normal', 'S-01 ログイン', J('sep-open', null, () => { S.auth = 'out'; S.login = freshLogin(); })],
   ['S-01:empty', 'S-01 empty（空のまま押した）', J('sep-open', null, () => { S.auth = 'out'; S.login = { ...freshLogin(), err: 'id' }; })],
   ['S-01:action', 'S-01 action（ログインに失敗）', J('sep-open', null, () => { S.auth = 'out'; S.login = { ...freshLogin(), id: 'masato', pw: 'wrong', err: 'fail' }; })],
@@ -3062,7 +3204,7 @@ function updateInspect() {
      シート = 中身がはみ出してスクロールが要るか（scrollHeight − clientHeight）と、固定部分（.sh-foot）の裏に中身が入っていないか
      （.sh-foot より前にある見えている最後の要素の下端 − .sh-foot の上端。正なら隠れている）の大きい方。
      S-20 = 共用の行（.jline）と見込みの注記の下端が固定部分（.s20-foot）の上端より下（該当するものをすべて測る）。
-     S-10・S-20 = 最初の [data-big] の上端が上から 200px を超える（オフラインの行の分は除く）。
+     S-10・S-20・S-40 = 最初の [data-big] の上端が上から 200px を超える（オフラインの行の分は除く）。
      S-11 = グリッドの上端（200px）と、グリッドの下端がタブバーに隠れないか・スクロールが要らないか */
   const devTop = dev.getBoundingClientRect().top;
   let b9 = null;
@@ -3085,7 +3227,7 @@ function updateInspect() {
           for (const el of root.querySelectorAll(sel)) if (vis(el)) b9 = Math.max(b9, Math.round(el.getBoundingClientRect().bottom - ft.getBoundingClientRect().top));
         }
       }
-      if (scr === 'S-20' || scr === 'S-10') {
+      if (scr === 'S-20' || scr === 'S-10' || scr === 'S-40') {
         const bg = [...root.querySelectorAll('[data-big]')].filter(vis)[0];
         const off = root.querySelector('.offline'); const offH = off && vis(off) ? off.getBoundingClientRect().height : 0;
         if (bg) b9 = Math.max(b9, Math.round(bg.getBoundingClientRect().top - devTop - offH - 200));
@@ -3108,7 +3250,7 @@ function updateInspect() {
   dev.classList.toggle('over', rows.some((r) => r[2]));
 }
 /* URL のハッシュ（キー・読む順・例は mock/README.md の「URL のハッシュ」。仕様書 §10.1）: s・st（画面ID・状態キー。読むときは s が S-01・S-02 のときだけ使う）、v（閲覧者）、sc（シナリオ）、d（端末の大きさ）、case（精算ケース）、
-   tab（S-11／S-10／S-20／S-30／S-31）、m（そのタブで見ている月）、sh（開いているシート）、sa（シートの主な引数）、
+   tab（S-11／S-10／S-40／S-20／S-30／S-31）、m（そのタブで見ている月）、pf・pt（分析タブの期間の始めの月・終わりの月）、sh（開いているシート）、sa（シートの主な引数）、
    j（画面へジャンプで来て、そのあと操作していないときのジャンプのキー） */
 function sheetArg(sh) {
   switch (sh.id) {
@@ -3116,7 +3258,8 @@ function sheetArg(sh) {
     case 'S-15': return sh.queue[sh.idx];   /* いま出している行（残りの先頭） */
     case 'S-22': case 'S-33': return sh.p;
     case 'S-32': return sh.tplId || '';
-    case 'S-04': return String(sh.year);    /* シートに出している年（タブは tab、いま見ている月は m で決まる） */
+    case 'S-04': return sh.end ? `${sh.end}:${sh.year}` : String(sh.year);    /* シートに出している年（タブは tab、いま見ている月は m で決まる）。分析の期間から開いたときは「from:2026」「to:2026」 */
+    case 'S-41': return sh.cat;
     case 'S-13': case 'S-21': return sh.m;
     case 'S-12': return sh.cat;
     default: return '';
@@ -3131,6 +3274,7 @@ function updateHash() {
     const tab = S.tab === 'S-30' && S.sub === 'S-31' ? 'S-31' : S.tab;
     q.set('tab', tab);
     if (tab === 'S-10') q.set('m', S.month.S10); else if (tab === 'S-20') q.set('m', S.month.S20);
+    else if (tab === 'S-40') { q.set('pf', S.range.from); q.set('pt', S.range.to); }   /* 分析の期間（始めの月・終わりの月） */
   }
   if (S.sheet) { q.set('sh', S.sheet.id); const a = sheetArg(S.sheet); if (a) q.set('sa', a); }
   if (S.jump) q.set('j', S.jump);
@@ -3151,14 +3295,24 @@ function applyHash() {
   /* S-02 は閲覧者 v の初回として置く */
   if (q.get('s') === 'S-02') { S.auth = 'in'; S.route = 'S-02'; S.onboarded[S.viewer] = false; S.onboard = { name: S.data.people[S.viewer].name, err: null }; return; }
   const tab = q.get('tab');
-  if (['S-11', 'S-10', 'S-20', 'S-30', 'S-31'].includes(tab)) { S.tab = tab === 'S-31' ? 'S-30' : tab; S.sub = tab === 'S-31' ? 'S-31' : null; }
+  if (['S-11', 'S-10', 'S-40', 'S-20', 'S-30', 'S-31'].includes(tab)) { S.tab = tab === 'S-31' ? 'S-30' : tab; S.sub = tab === 'S-31' ? 'S-31' : null; }
   const months = CALC.monthsUntil(S.data, S.now), m = q.get('m');
   if (months.includes(m)) { if (S.tab === 'S-10') S.month.S10 = m; else if (S.tab === 'S-20') S.month.S20 = m; }
+  /* 分析の期間: 選べる月の中で、始め ≦ 終わり、12か月まで のときだけ使う（それ以外は既定の期間のまま） */
+  const pf = q.get('pf'), pt = q.get('pt');
+  if (S.tab === 'S-40' && months.includes(pf) && months.includes(pt) && pf <= pt && CALC.monthsBetween(pf, pt).length <= 12) S.range = { from: pf, to: pt };
   const sa = q.get('sa') || '';
   const open = {
     'S-03': () => ACT.openS03(),
     /* 月を選ぶ: 上部バーの年月から開くので、tab が支出か精算のときだけ。sa はシートに出す年（範囲の外・空なら見ている月の年） */
     'S-04': () => {
+      if (S.tab === 'S-40') {   /* 分析の期間のチップから（sa は「from:2026」「to:2026」） */
+        const [end, yy] = sa.split(':'); if (end !== 'from' && end !== 'to') return;
+        ACT.openRange(end);
+        const y = +yy, y0 = +S.data.household.createdMonth.slice(0, 4), y1 = +curMonth().slice(0, 4);
+        if (/^\d{4}$/.test(yy || '') && y >= y0 && y <= y1) S.sheet.year = y;
+        return;
+      }
       if (S.tab !== 'S-10' && S.tab !== 'S-20') return;
       const k = S.tab === 'S-10' ? 'S10' : 'S20';
       ACT.openS04(k);
@@ -3181,6 +3335,7 @@ function applyHash() {
     'S-32': () => ACT.openS32(S.data.templates.some((t) => t.id === sa) ? sa : undefined),
     'S-33': () => { if (sa === 'a' || sa === 'b') ACT.openS33(sa); },
     'S-34': () => ACT.openS34(),
+    'S-41': () => { if (S.tab === 'S-40' && catOf(sa)) ACT.openS41(sa); },   /* S-40 のカテゴリの行から開くので、tab が分析のときだけ */
     'S-35': () => { if (S.sub === 'S-31' && S.data.tplChanges.length) ACT.openS35(); },   /* S-31 から開くので、tab が S-31 で履歴があるときだけ */
   }[q.get('sh')];
   if (open) open();

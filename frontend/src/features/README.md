@@ -4,6 +4,7 @@
 
 - `record/` … S-11（記録タブのトップ）・S-12
 - `expenses/` … S-10・S-13・S-14・S-15
+- `analysis/` … S-40・S-41
 - `settle/` … S-20・S-21・S-22
 - `settings/` … S-30〜S-34
 - `auth/` … S-01・S-02・S-03

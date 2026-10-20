@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Building2,
   CalendarSync,
+  ChartColumn,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -43,6 +44,7 @@ export const icons = {
   // タブ（§3.1）
   tabRecord: CirclePlus, // 記録（記録タブだけ。＋ 追加 は plus）
   tabExpenses: ReceiptText, // 支出
+  tabAnalysis: ChartColumn, // 分析
   tabSettle: ArrowLeftRight, // 精算
   tabSettings: Settings, // 設定
   // 共通
